@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+from dotenv import load_dotenv
+
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+
+@dataclass
+class Config:
+    openai_api_key: str
+    model: str = "whisper-large-v3-turbo"
+    timeout: int = 600  # seconds
+    chunk_target_mb: int = 24
+    audio_bitrate: str = "96k"  # ffmpeg format, e.g., "64k", "96k", "128k"
+    base_url: Optional[str] = None  # None = OpenAI default
+
+    @staticmethod
+    def load(env_path: Optional[str] = None) -> "Config":
+        load_dotenv(dotenv_path=env_path, override=False)
+
+        groq_key = os.getenv("GROQ_API_KEY")
+        openai_key = os.getenv("OPENAI_API_KEY")
+
+        if groq_key:
+            api_key = groq_key
+            base_url = GROQ_BASE_URL
+            default_model = "whisper-large-v3-turbo"
+        elif openai_key:
+            api_key = openai_key
+            base_url = None
+            default_model = "gpt-4o-transcribe"
+        else:
+            raise RuntimeError(
+                "No API key found. Set GROQ_API_KEY or OPENAI_API_KEY in your environment or .env file."
+            )
+
+        model = os.getenv("TRANSCRIBE_MODEL", default_model)
+        timeout = int(os.getenv("OPENAI_TIMEOUT", "600"))
+        chunk_target_mb = int(os.getenv("CHUNK_TARGET_MB", "24"))
+        audio_bitrate = os.getenv("AUDIO_BITRATE", "96k")
+
+        return Config(
+            openai_api_key=api_key,
+            model=model,
+            timeout=timeout,
+            chunk_target_mb=chunk_target_mb,
+            audio_bitrate=audio_bitrate,
+            base_url=base_url,
+        )

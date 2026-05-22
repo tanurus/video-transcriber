@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+avtx_*/
+avtx_chunks_*/
+*.log
+.env
