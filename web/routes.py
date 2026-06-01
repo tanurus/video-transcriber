@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import (
     Flask,
+    abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
+    send_file,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -61,15 +65,48 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/job/<job_id>")
     def job_page(job_id):  # noqa: ANN202
-        return "", 501
+        storage = current_app.config["STORAGE"]
+        job = storage.get_job(job_id)
+        if job is None:
+            abort(404)
+        return render_template("job.html", job=job)
 
     @app.route("/api/job/<job_id>")
     def job_api(job_id):  # noqa: ANN202
-        return "", 501
+        storage = current_app.config["STORAGE"]
+        jobs = current_app.config["JOBS"]
+        job = storage.get_job(job_id)
+        if job is None:
+            abort(404)
+        since = request.args.get("since", default=0, type=int)
+        lines, next_index = jobs.get_logs(job_id, since=since)
+        return jsonify(
+            {
+                "status": job.status,
+                "lines": lines,
+                "next_index": next_index,
+                "download_ready": job.status == "done",
+                "error": job.error,
+            }
+        )
 
     @app.route("/download/<job_id>")
     def download(job_id):  # noqa: ANN202
-        return "", 501
+        settings = current_app.config["SETTINGS"]
+        storage = current_app.config["STORAGE"]
+        job = storage.get_job(job_id)
+        if job is None or not job.transcript_path:
+            abort(404)
+        path = settings.data_dir / job.transcript_path
+        if not path.exists():
+            abort(404)
+        download_name = Path(job.original_name).stem + ".txt"
+        return send_file(
+            str(path),
+            as_attachment=True,
+            download_name=download_name,
+            mimetype="text/plain",
+        )
 
     @app.route("/history")
     def history():  # noqa: ANN202

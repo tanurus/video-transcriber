@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ job.original_name }} — Video Transcriber{% endblock %}
+{% block content %}
+<h1>{{ job.original_name }}</h1>
+<p>Status: <span id="status">{{ job.status }}</span></p>
+<pre id="log"></pre>
+<p id="download" {% if job.status != 'done' %}hidden{% endif %}>
+  <a href="{{ url_for('download', job_id=job.id) }}">Download transcript (.txt)</a>
+</p>
+<script src="{{ url_for('static', filename='job.js') }}"
+        data-api="{{ url_for('job_api', job_id=job.id) }}"></script>
+{% endblock %}
