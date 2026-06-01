@@ -51,6 +51,23 @@ You can customize behavior via environment variables (in your shell or `.env`):
 - `CHUNK_TARGET_MB` (optional): Target max size per audio chunk before uploading, default 24 (MB).
 - `AUDIO_BITRATE` (optional): MP3 bitrate used for export (e.g., `64k`, `96k`, `128k`). Default `96k`.
 
+## Web app on a VPS (browser access over Tailscale)
+
+You can run this as a browser app on a Linux VPS and reach it from any device on
+your Tailscale tailnet — upload a video, watch live progress, and download the
+transcript, with no local app running.
+
+See [docs/deploy.md](docs/deploy.md) for full instructions. In short:
+
+```bash
+git clone https://github.com/tanurus/video-transcriber.git && cd video-transcriber
+echo 'GROQ_API_KEY=gsk_...' > .env
+chmod +x deploy.sh && ./deploy.sh
+sudo tailscale serve --bg --https=443 http://127.0.0.1:8000
+```
+
+Then open `https://transcribe.<your-tailnet>.ts.net`.
+
 ## Notes
 - ffmpeg is required for extracting audio and chunking. If not found, install it with winget/choco or manually and reopen your terminal so PATH updates.
 - The app uses temporary directories for intermediate audio/chunks. They are cleaned up automatically.
