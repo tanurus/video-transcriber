@@ -1,0 +1,15 @@
+.venv/
+.git/
+.gitignore
+data/
+docs/
+tests/
+**/__pycache__/
+*.pyc
+.env
+start_app.bat
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm

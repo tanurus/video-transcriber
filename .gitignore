@@ -5,3 +5,4 @@ avtx_*/
 avtx_chunks_*/
 *.log
 .env
+data/

@@ -1,0 +1,22 @@
+services:
+  web:
+    build: .
+    image: video-transcriber-web
+    container_name: transcriber
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - RETAIN_VIDEO_DAYS=30
+      - MAX_CONTENT_MB=2048
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
