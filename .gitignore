@@ -6,3 +6,4 @@ avtx_chunks_*/
 *.log
 .env
 data/
+localdata/
