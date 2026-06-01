@@ -110,4 +110,5 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/history")
     def history():  # noqa: ANN202
-        return "", 501
+        storage = current_app.config["STORAGE"]
+        return render_template("history.html", jobs=storage.list_jobs())
