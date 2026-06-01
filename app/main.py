@@ -8,9 +8,12 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Callable
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
-from tkinter import ttk
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext, ttk
+except ImportError:  # headless environments (e.g. the Docker server image) have no Tk
+    tk = None  # type: ignore[assignment]
+    filedialog = messagebox = scrolledtext = ttk = None  # type: ignore[assignment]
 
 from tqdm import tqdm
 
@@ -319,6 +322,13 @@ class TranscriptionApp:
 
 
 def run_gui() -> int:
+    if tk is None:
+        print(
+            "The graphical interface requires tkinter, which is not available in this "
+            "environment. Use the CLI or the web app instead.",
+            file=sys.stderr,
+        )
+        return 2
     root = tk.Tk()
     TranscriptionApp(root)
     root.mainloop()
