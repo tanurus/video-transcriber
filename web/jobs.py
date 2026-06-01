@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,3 +64,38 @@ class JobManager:
         except Exception as e:  # noqa: BLE001 - surface any failure as job error
             self.storage.update_status(job_id, "error", completed_at=_utcnow_iso(), error=str(e))
             self._append_log(job_id, f"Error: {e}")
+
+
+def purge_old_videos(settings: WebSettings, now: Optional[float] = None) -> int:
+    """Delete upload directories whose mtime is older than the retention window.
+
+    Returns the number of directories removed. Transcripts are never touched.
+    """
+    if now is None:
+        now = time.time()
+    uploads = settings.uploads_dir
+    if not uploads.exists():
+        return 0
+    cutoff = now - settings.retain_video_days * 86400
+    removed = 0
+    for child in uploads.iterdir():
+        if child.is_dir() and child.stat().st_mtime < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
+            removed += 1
+    return removed
+
+
+def start_cleanup_thread(settings: WebSettings, interval_seconds: int = 86400) -> threading.Thread:
+    """Run an immediate purge, then purge every `interval_seconds`, in a daemon thread."""
+
+    def _loop() -> None:
+        while True:
+            try:
+                purge_old_videos(settings)
+            except Exception:  # noqa: BLE001 - cleanup must never crash the app
+                pass
+            time.sleep(interval_seconds)
+
+    thread = threading.Thread(target=_loop, name="video-cleanup", daemon=True)
+    thread.start()
+    return thread
