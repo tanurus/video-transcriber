@@ -11,6 +11,8 @@ from typing import Callable, Optional
 from .settings import WebSettings
 from .storage import Storage
 
+MAX_TRACKED_JOBS = 50
+
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -37,6 +39,10 @@ class JobManager:
 
     def _append_log(self, job_id: str, line: str) -> None:
         with self._lock:
+            if job_id not in self._logs and len(self._logs) >= MAX_TRACKED_JOBS:
+                # Evict the oldest tracked job's buffer to bound memory on a long-lived server.
+                oldest = next(iter(self._logs))
+                del self._logs[oldest]
             self._logs.setdefault(job_id, []).append(line)
 
     def get_logs(self, job_id: str, since: int = 0) -> tuple[list[str], int]:

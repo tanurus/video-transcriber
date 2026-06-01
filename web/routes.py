@@ -79,6 +79,8 @@ def register_routes(app: Flask) -> None:
         if job is None:
             abort(404)
         since = request.args.get("since", default=0, type=int)
+        if since < 0:
+            since = 0
         lines, next_index = jobs.get_logs(job_id, since=since)
         return jsonify(
             {
@@ -97,7 +99,9 @@ def register_routes(app: Flask) -> None:
         job = storage.get_job(job_id)
         if job is None or not job.transcript_path:
             abort(404)
-        path = settings.data_dir / job.transcript_path
+        path = (settings.data_dir / job.transcript_path).resolve()
+        if not path.is_relative_to(settings.data_dir.resolve()):
+            abort(404)
         if not path.exists():
             abort(404)
         download_name = Path(job.original_name).stem + ".txt"

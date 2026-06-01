@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from flask import Flask
@@ -35,7 +36,9 @@ def create_app(
         )
 
     app = Flask(__name__)
-    app.secret_key = "transcriber-local"  # only used for flash messages on a private tailnet
+    # Flash messages only; on a private tailnet there's no session-security requirement.
+    # Prefer an env-provided key; fall back to a random per-process key.
+    app.secret_key = os.environ.get("SECRET_KEY") or os.urandom(24)
     app.config["MAX_CONTENT_LENGTH"] = settings.max_content_mb * 1024 * 1024
     app.config["SETTINGS"] = settings
     app.config["STORAGE"] = storage

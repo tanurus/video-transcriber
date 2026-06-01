@@ -86,6 +86,8 @@ class Storage:
         transcript_path: Optional[str] = None,
         error: Optional[str] = None,
     ) -> None:
+        if status not in VALID_STATUSES:
+            raise ValueError(f"invalid status: {status!r}")
         sets = ["status = ?"]
         params: list[object] = [status]
         if completed_at is not None:
