@@ -42,6 +42,7 @@ def transcribe_video(
     cfg: Config,
     logger: Callable[[str], None] | None = None,
     use_tqdm: bool = False,
+    out_path: Path | None = None,
 ) -> Path:
     """Transcribe a video, reporting progress via the provided logger."""
     log = logger or (lambda msg: print(msg))
@@ -102,7 +103,8 @@ def transcribe_video(
 
     transcript = "\n\n".join(transcript_parts).strip()
 
-    out_txt = video_path.with_suffix(".txt")
+    out_txt = Path(out_path) if out_path else video_path.with_suffix(".txt")
+    out_txt.parent.mkdir(parents=True, exist_ok=True)
     out_txt.write_text(transcript, encoding="utf-8")
     log(f"Transcript saved to {out_txt}")
     return out_txt
