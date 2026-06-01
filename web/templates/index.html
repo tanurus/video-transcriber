@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Upload a video to transcribe</h1>
+<form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+  <input type="file" name="video" accept="video/*,audio/*" required>
+  <button type="submit">Start transcription</button>
+</form>
+
+<h2>Recent transcripts</h2>
+<ul class="recent">
+{% for job in jobs %}
+  <li>
+    <a href="{{ url_for('job_page', job_id=job.id) }}">{{ job.original_name }}</a>
+    — {{ job.status }}
+    {% if job.status == 'done' %}
+      (<a href="{{ url_for('download', job_id=job.id) }}">download</a>)
+    {% endif %}
+  </li>
+{% else %}
+  <li>None yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}
