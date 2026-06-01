@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import queue
+import shutil
 import sys
 import tempfile
 import threading
@@ -54,60 +55,68 @@ def transcribe_video(
     temp_dir = Path(tempfile.mkdtemp(prefix="avtx_work_"))
     log(f"Working directory: {temp_dir}")
 
-    log("Extracting audio with ffmpeg...")
-    use_video_directly = False
+    chunk_dirs: list[Path] = []
     try:
-        audio_path = extract_audio(video_path, out_dir=temp_dir, bitrate=cfg.audio_bitrate)
-    except Exception as e:
-        log(f"Audio extraction failed: {e}")
-        log("Will attempt to upload the original video directly to the transcription API.")
-        use_video_directly = True
-
-    audio_files = []
-    if not use_video_directly:
+        log("Extracting audio with ffmpeg...")
+        use_video_directly = False
         try:
-            size_mb = audio_path.stat().st_size / (1024 * 1024)
-        except Exception:
-            size_mb = cfg.chunk_target_mb + 1  # force chunk if unknown
+            audio_path = extract_audio(video_path, out_dir=temp_dir, bitrate=cfg.audio_bitrate)
+        except Exception as e:
+            log(f"Audio extraction failed: {e}")
+            log("Will attempt to upload the original video directly to the transcription API.")
+            use_video_directly = True
 
-        audio_files = [audio_path]
-        if size_mb > cfg.chunk_target_mb:
-            log(f"Audio is {size_mb:.1f} MB; chunking into ~{cfg.chunk_target_mb} MB segments...")
+        audio_files = []
+        if not use_video_directly:
             try:
-                audio_files = chunk_audio_by_size(audio_path, target_mb=cfg.chunk_target_mb, bitrate=cfg.audio_bitrate)
-            except Exception as e:
-                log(f"Chunking failed (continuing with single file): {e}")
-                audio_files = [audio_path]
-    else:
-        try:
-            size_mb = video_path.stat().st_size / (1024 * 1024)
-        except Exception:
-            size_mb = 0
-        if size_mb > 0:
-            log(f"Video size: {size_mb:.1f} MB")
-        log("Note: Without ffmpeg, large files cannot be chunked; upload may fail if too large.")
-        audio_files = [video_path]
+                size_mb = audio_path.stat().st_size / (1024 * 1024)
+            except Exception:
+                size_mb = cfg.chunk_target_mb + 1  # force chunk if unknown
 
-    client = WhisperClient(api_key=cfg.openai_api_key, model=cfg.model, timeout=cfg.timeout, base_url=cfg.base_url)
+            audio_files = [audio_path]
+            if size_mb > cfg.chunk_target_mb:
+                log(f"Audio is {size_mb:.1f} MB; chunking into ~{cfg.chunk_target_mb} MB segments...")
+                try:
+                    audio_files = chunk_audio_by_size(audio_path, target_mb=cfg.chunk_target_mb, bitrate=cfg.audio_bitrate)
+                    if audio_files and audio_files[0].parent != temp_dir:
+                        chunk_dirs.append(audio_files[0].parent)
+                except Exception as e:
+                    log(f"Chunking failed (continuing with single file): {e}")
+                    audio_files = [audio_path]
+        else:
+            try:
+                size_mb = video_path.stat().st_size / (1024 * 1024)
+            except Exception:
+                size_mb = 0
+            if size_mb > 0:
+                log(f"Video size: {size_mb:.1f} MB")
+            log("Note: Without ffmpeg, large files cannot be chunked; upload may fail if too large.")
+            audio_files = [video_path]
 
-    log("Transcribing...")
-    transcript_parts = []
-    iterator = enumerate(audio_files, start=1)
-    total_segments = len(audio_files)
-    if use_tqdm:
-        iterator = enumerate(tqdm(audio_files, desc="Segments"), start=1)
-    for idx, f in iterator:
-        log(f"Transcribing segment {idx}/{total_segments}: {f.name}")
-        text = client.transcribe_file(f)
-        transcript_parts.append(text.strip())
+        client = WhisperClient(api_key=cfg.openai_api_key, model=cfg.model, timeout=cfg.timeout, base_url=cfg.base_url)
 
-    transcript = "\n\n".join(transcript_parts).strip()
+        log("Transcribing...")
+        transcript_parts = []
+        iterator = enumerate(audio_files, start=1)
+        total_segments = len(audio_files)
+        if use_tqdm:
+            iterator = enumerate(tqdm(audio_files, desc="Segments"), start=1)
+        for idx, f in iterator:
+            log(f"Transcribing segment {idx}/{total_segments}: {f.name}")
+            text = client.transcribe_file(f)
+            transcript_parts.append(text.strip())
 
-    out_txt = Path(out_path) if out_path else video_path.with_suffix(".txt")
-    out_txt.parent.mkdir(parents=True, exist_ok=True)
-    out_txt.write_text(transcript, encoding="utf-8")
-    log(f"Transcript saved to {out_txt}")
-    return out_txt
+        transcript = "\n\n".join(transcript_parts).strip()
+
+        out_txt = Path(out_path) if out_path else video_path.with_suffix(".txt")
+        out_txt.parent.mkdir(parents=True, exist_ok=True)
+        out_txt.write_text(transcript, encoding="utf-8")
+        log(f"Transcript saved to {out_txt}")
+        return out_txt
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        for d in chunk_dirs:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def run_cli(args: argparse.Namespace) -> int:

@@ -13,3 +13,6 @@ start_app.bat
 *.mov
 *.avi
 *.webm
+*.m4a
+*.mp3
+*.wav

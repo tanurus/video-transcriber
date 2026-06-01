@@ -40,6 +40,9 @@ class Storage:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # WAL lets the single writer (worker thread) and HTTP reader threads
+        # proceed without blocking each other. journal_mode is persisted per-db.
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _init_schema(self) -> None:

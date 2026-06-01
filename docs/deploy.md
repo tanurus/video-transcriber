@@ -48,6 +48,7 @@ The app runs as a Docker container, reachable only over your Tailscale tailnet.
 - `RETAIN_VIDEO_DAYS` (default 30)
 - `MAX_CONTENT_MB` (default 2048)
 - `ALLOWED_EXT` (default `mp4,mkv,mov,avi,webm,m4a,mp3,wav`)
+- `SECRET_KEY` (optional) — only needed if you raise gunicorn workers above 1; otherwise a random per-process key is used for flash messages.
 
 ## Notes
 - The container binds only to `127.0.0.1:8000`; nothing is exposed to the public internet.

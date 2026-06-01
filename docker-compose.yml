@@ -10,6 +10,9 @@ services:
       - DATA_DIR=/data
       - RETAIN_VIDEO_DAYS=30
       - MAX_CONTENT_MB=2048
+      # Optional. Only needed if you raise gunicorn --workers above 1 (so flash
+      # messages stay valid across workers). Otherwise a random per-process key is used.
+      # - SECRET_KEY=change-me
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
