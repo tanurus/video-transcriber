@@ -73,6 +73,10 @@ Your devices ──(Tailscale tailnet, HTTPS)──► VPS host
 - **gunicorn runs a single worker with multiple threads** so the in-process job registry and the
   single background worker are coherent (no cross-process state). One transcription runs at a time
   via `ThreadPoolExecutor(max_workers=1)`; additional uploads queue.
+- **gunicorn `--timeout` is set high (e.g. 1200s)** because the upload transfer happens inside the
+  `POST /upload` request; the transcription itself runs in the background thread, so only the upload
+  (not the transcription) is bounded by the request timeout. Threaded worker so a long upload does
+  not block the polling endpoints.
 
 ## Storage layout
 
