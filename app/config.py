@@ -13,7 +13,7 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 @dataclass
 class Config:
     openai_api_key: str
-    model: str = "whisper-large-v3-turbo"
+    model: str = "whisper-large-v3"
     timeout: int = 600  # seconds
     chunk_target_mb: int = 24
     audio_bitrate: str = "96k"  # ffmpeg format, e.g., "64k", "96k", "128k"
@@ -29,7 +29,9 @@ class Config:
         if groq_key:
             api_key = groq_key
             base_url = GROQ_BASE_URL
-            default_model = "whisper-large-v3-turbo"
+            # whisper-large-v3 = highest quality AND the only Groq model that
+            # supports the translations (-> English) endpoint used by WhisperClient.
+            default_model = "whisper-large-v3"
         elif openai_key:
             api_key = openai_key
             base_url = None

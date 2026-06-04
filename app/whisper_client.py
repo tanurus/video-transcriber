@@ -8,7 +8,7 @@ from openai import OpenAI, RateLimitError, APIError, APITimeoutError
 
 
 class WhisperClient:
-    def __init__(self, api_key: str, model: str = "whisper-large-v3-turbo", timeout: int = 600, base_url: str | None = None) -> None:
+    def __init__(self, api_key: str, model: str = "whisper-large-v3", timeout: int = 600, base_url: str | None = None) -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
         self.timeout = timeout
@@ -20,10 +20,15 @@ class WhisperClient:
         for attempt in range(1, retries + 1):
             try:
                 with open(audio_file, "rb") as f:
-                    resp = self.client.audio.transcriptions.create(
+                    # Use the translations endpoint so the output is ALWAYS English,
+                    # regardless of the spoken language (e.g. Russian / Romanian).
+                    # temperature=0 minimises Whisper's repetition/hallucination loops.
+                    # NOTE: Groq supports translations only with whisper-large-v3.
+                    resp = self.client.audio.translations.create(
                         model=self.model,
                         file=f,
                         response_format=response_format,
+                        temperature=0,
                     )
                 # For response_format="text", resp is a string-like object with .text
                 if hasattr(resp, "text") and isinstance(resp.text, str):
