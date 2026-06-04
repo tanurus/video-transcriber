@@ -46,6 +46,37 @@ def test_upload_valid_creates_job_and_redirects(client):
     assert any(saved.iterdir())
 
 
+def test_upload_ajax_returns_json_job_url(client):
+    data = {"video": (io.BytesIO(b"fake video bytes"), "Meeting.mp4")}
+    resp = client.post(
+        "/upload",
+        data=data,
+        content_type="multipart/form-data",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["job_id"]
+    assert "/job/" in payload["job_url"]
+    jobs = client._storage.list_jobs()
+    assert len(jobs) == 1
+    assert len(client._jobs.submitted) == 1
+
+
+def test_upload_ajax_bad_extension_returns_json_error(client):
+    data = {"video": (io.BytesIO(b"x"), "notes.txt")}
+    resp = client.post(
+        "/upload",
+        data=data,
+        content_type="multipart/form-data",
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+    assert client._storage.list_jobs() == []
+    assert client._jobs.submitted == []
+
+
 def test_upload_missing_file_flashes_and_redirects(client):
     resp = client.post("/upload", data={}, content_type="multipart/form-data")
     assert resp.status_code == 302

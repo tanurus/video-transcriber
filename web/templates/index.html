@@ -1,10 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Upload a video to transcribe</h1>
-<form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
-  <input type="file" name="video" accept="video/*,audio/*" required>
-  <button type="submit">Start transcription</button>
+<form id="upload-form" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+  <input id="file-input" type="file" name="video" accept="video/*,audio/*" required>
+  <button id="submit-btn" type="submit">Start transcription</button>
 </form>
+
+<div id="upload-progress" hidden aria-live="polite">
+  <div class="progress-label">
+    <span id="progress-text">Uploading…</span>
+    <span id="progress-pct">0%</span>
+  </div>
+  <div class="progress-track"><div id="progress-bar" class="progress-fill"></div></div>
+</div>
 
 <h2>Recent transcripts</h2>
 <ul class="recent">
@@ -20,4 +28,6 @@
   <li>None yet.</li>
 {% endfor %}
 </ul>
+
+<script src="{{ url_for('static', filename='upload.js') }}"></script>
 {% endblock %}

@@ -36,16 +36,25 @@ def register_routes(app: Flask) -> None:
         storage = current_app.config["STORAGE"]
         jobs = current_app.config["JOBS"]
 
+        # The browser uploads via XHR (see static/upload.js) so it can show a
+        # progress bar; those requests want JSON, not a redirect. A plain form
+        # POST (JS disabled) still gets the original redirect behaviour.
+        wants_json = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        def fail(message: str, status: int = 400):  # noqa: ANN202
+            if wants_json:
+                return jsonify({"error": message}), status
+            flash(message)
+            return redirect(url_for("index"))
+
         file = request.files.get("video")
         if file is None or not file.filename:
-            flash("Please choose a file to upload.")
-            return redirect(url_for("index"))
+            return fail("Please choose a file to upload.")
 
         filename = file.filename
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in settings.allowed_ext:
-            flash(f"Unsupported file type: .{ext}")
-            return redirect(url_for("index"))
+            return fail(f"Unsupported file type: .{ext}")
 
         job_id = uuid.uuid4().hex
         safe_name = secure_filename(filename) or f"upload.{ext}"
@@ -56,10 +65,15 @@ def register_routes(app: Flask) -> None:
 
         storage.create_job(job_id, filename, datetime.now(timezone.utc).isoformat())
         jobs.submit(job_id, video_path)
-        return redirect(url_for("job_page", job_id=job_id))
+        job_url = url_for("job_page", job_id=job_id)
+        if wants_json:
+            return jsonify({"job_id": job_id, "job_url": job_url})
+        return redirect(job_url)
 
     @app.errorhandler(413)
     def too_large(_e):  # noqa: ANN202
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "File too large."}), 413
         flash("File too large.")
         return redirect(url_for("index"))
 
