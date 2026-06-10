@@ -8,10 +8,11 @@ from openai import OpenAI, RateLimitError, APIError, APITimeoutError
 
 
 class WhisperClient:
-    def __init__(self, api_key: str, model: str = "whisper-large-v3-turbo", timeout: int = 600, base_url: str | None = None) -> None:
+    def __init__(self, api_key: str, model: str = "whisper-large-v3-turbo", timeout: int = 600, base_url: str | None = None, language: str = "en") -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
         self.timeout = timeout
+        self.language = language
 
     def transcribe_file(self, audio_file: str | Path, response_format: str = "text") -> str:
         retries = 3
@@ -24,6 +25,7 @@ class WhisperClient:
                         model=self.model,
                         file=f,
                         response_format=response_format,
+                        language=self.language,
                     )
                 # For response_format="text", resp is a string-like object with .text
                 if hasattr(resp, "text") and isinstance(resp.text, str):
