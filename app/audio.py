@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import List, Optional
+
+
+FFMPEG_TIMEOUT_SECONDS = 3600  # a hung ffmpeg must never wedge the worker forever
 
 
 def _which_ffmpeg() -> Optional[str]:
@@ -21,6 +23,22 @@ def require_ffmpeg() -> str:
             "ffmpeg not found on PATH. Install it from https://ffmpeg.org/download.html and ensure ffmpeg.exe is on PATH."
         )
     return ffmpeg
+
+
+def _run_ffmpeg(cmd: List[str]) -> None:
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
+        )
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode("utf-8", "replace").strip() if e.stderr else ""
+        detail = stderr[-500:] or "no stderr output"
+        raise RuntimeError(f"ffmpeg failed (exit {e.returncode}): {detail}") from e
 
 
 def extract_audio(
@@ -63,7 +81,7 @@ def extract_audio(
         str(audio_path),
     ]
 
-    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    _run_ffmpeg(cmd)
     return audio_path
 
 
@@ -107,7 +125,9 @@ def chunk_audio_by_size(
     target_seconds = max(int((target_mb * 1024 * 1024 * 8) / max(bps, 1)), min_segment_sec)
 
     out_dir = Path(tempfile.mkdtemp(prefix="avtx_chunks_"))
-    pattern = out_dir / (audio_path.stem + ".part%03d.mp3")
+    # Fixed segment names: the source stem must not reach ffmpeg's printf
+    # pattern ('%' breaks it) or the glob below ('[', '*', '?' break matching).
+    pattern = out_dir / "part%03d.mp3"
 
     cmd = [
         ffmpeg,
@@ -120,14 +140,22 @@ def chunk_audio_by_size(
         str(target_seconds),
         "-reset_timestamps",
         "1",
+        # Stream-copy: re-encoding at ffmpeg's default bitrate would inflate
+        # chunks past the target size (and waste a full encode pass).
+        "-c",
+        "copy",
         str(pattern),
     ]
 
-    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        _run_ffmpeg(cmd)
+    except Exception:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise
 
-    # Collect chunks sorted
-    chunks = sorted(out_dir.glob(audio_path.stem + ".part" + "*" + ".mp3"))
+    chunks = sorted(out_dir.glob("part*.mp3"))
     if not chunks:
-        # If segmenting failed, fall back to returning the original file
+        # If segmenting produced nothing, fall back to the original file
+        shutil.rmtree(out_dir, ignore_errors=True)
         return [audio_path]
     return chunks

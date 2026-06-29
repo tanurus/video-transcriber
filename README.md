@@ -1,17 +1,19 @@
-# Audio/Video to Transcript CLI
+# Audio/Video to Transcript
 
-A small Python CLI that extracts audio from a video file and sends it to the OpenAI Transcriptions API (Whisper-compatible) to get a transcript, saving a `.txt` next to the original video.
+A small Python tool that extracts audio from a video file and sends it to an OpenAI-compatible Transcriptions API (OpenAI or Groq) to get a transcript, saving a `.txt` next to the original video. Runs as a CLI, a desktop GUI with a file queue, or a [browser app on a VPS](docs/deploy.md).
 
 ## Features
 - Extract audio from most video formats via ffmpeg
 - Automatically chunk large audio into smaller parts when needed
-- Calls OpenAI Transcriptions API (default model: `gpt-4o-transcribe`)
+- Calls an OpenAI-compatible Transcriptions API — Groq (default model: `whisper-large-v3-turbo`) or OpenAI (default model: `gpt-4o-transcribe`)
+- Transcription language is pinned to English (`en`) by default; override with `TRANSCRIBE_LANGUAGE`
 - Saves transcript in the same folder as the input video
+- Desktop GUI: select a finished file to copy its transcript to the clipboard, open the `.txt`, or reveal it in the file manager
 
 ## Requirements
 - Python 3.9+
 - ffmpeg available on PATH (https://ffmpeg.org/download.html)
-- An OpenAI API key with access to transcriptions
+- A Groq or OpenAI API key with access to transcriptions
 
 ## Setup (Windows PowerShell)
 ```powershell
@@ -22,8 +24,8 @@ python -m venv .venv
 # 2) Install dependencies
 pip install -r requirements.txt
 
-# 3) Set your OpenAI API key (temporarily for this session)
-$env:OPENAI_API_KEY = "sk-..."
+# 3) Set your API key (temporarily for this session)
+$env:GROQ_API_KEY = "gsk_..."   # or $env:OPENAI_API_KEY = "sk-..."
 
 # Optional: Or create a .env file (copied from .env.example) to load automatically
 Copy-Item .env.example .env
@@ -36,20 +38,26 @@ winget install --id=Gyan.FFmpeg  --accept-package-agreements --accept-source-agr
 choco install ffmpeg -y
 # Option C: Manual — download a static build from https://www.gyan.dev/ffmpeg/builds/ and add its bin folder to PATH
 
-# 5) Run the CLI against your file (default file is the one the request mentioned)
-python -m app.main "with Vlass (updated priorities for Priceline and Arangrant) 2025-09-26 14-06-17.mkv"
+# 5) Run the CLI against your file
+python -m app.main "C:\path\to\your video.mkv"
+
+# Or launch the desktop GUI (add files to a queue, watch progress)
+python -m app.main --gui
 ```
 
-If you omit the argument, it tries to use the default filename above in the current directory. The transcript is written as a `.txt` file with the same base name in the same folder.
+The transcript is written as a `.txt` file with the same base name in the same folder as the video.
 
 ## Configuration
-You can customize behavior via environment variables (in your shell or `.env`):
+You can customize behavior via environment variables (in your shell or `.env`, see `.env.example`):
 
-- `OPENAI_API_KEY` (required): Your API key.
-- `OPENAI_TRANSCRIBE_MODEL` (optional): Defaults to `gpt-4o-transcribe`. You may set to `whisper-1` if your account still supports it.
+- `GROQ_API_KEY` / `OPENAI_API_KEY` (one required): If both are set, `GROQ_API_KEY` takes precedence and requests go to Groq's API.
+- `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3-turbo` on Groq, `gpt-4o-transcribe` on OpenAI. Make sure the model you set exists on the provider in use.
+- `TRANSCRIBE_LANGUAGE` (optional): Transcription language as an ISO-639-1 code. Defaults to `en` (forced English).
 - `OPENAI_TIMEOUT` (optional): Request timeout in seconds, default 600.
 - `CHUNK_TARGET_MB` (optional): Target max size per audio chunk before uploading, default 24 (MB).
 - `AUDIO_BITRATE` (optional): MP3 bitrate used for export (e.g., `64k`, `96k`, `128k`). Default `96k`.
+
+Note: the transcription language is intentionally forced to English by default — Whisper does not auto-detect here. Non-English audio will come out wrong unless you set `TRANSCRIBE_LANGUAGE` accordingly.
 
 ## Web app on a VPS (browser access over Tailscale)
 

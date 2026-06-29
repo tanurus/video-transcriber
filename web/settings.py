@@ -16,14 +16,15 @@ class WebSettings:
 
     @staticmethod
     def load() -> "WebSettings":
-        raw_ext = os.getenv("ALLOWED_EXT", DEFAULT_ALLOWED_EXT)
+        # "or default" so blank env values ("RETAIN_VIDEO_DAYS=") behave like unset.
+        raw_ext = os.getenv("ALLOWED_EXT") or DEFAULT_ALLOWED_EXT
         allowed = frozenset(
             e.strip().lower().lstrip(".") for e in raw_ext.split(",") if e.strip()
         )
         return WebSettings(
-            data_dir=Path(os.getenv("DATA_DIR", "/data")),
-            retain_video_days=int(os.getenv("RETAIN_VIDEO_DAYS", "30")),
-            max_content_mb=int(os.getenv("MAX_CONTENT_MB", "2048")),
+            data_dir=Path(os.getenv("DATA_DIR") or "/data"),
+            retain_video_days=int(os.getenv("RETAIN_VIDEO_DAYS") or "30"),
+            max_content_mb=int(os.getenv("MAX_CONTENT_MB") or "2048"),
             allowed_ext=allowed,
         )
 

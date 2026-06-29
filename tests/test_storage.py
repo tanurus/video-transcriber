@@ -48,7 +48,9 @@ def test_list_jobs_newest_first(settings):
     assert ids == ["b", "a"]
 
 
-def test_reconcile_interrupted(settings):
+def test_reconcile_interrupted_only_touches_running(settings):
+    # 'queued' jobs are requeued at boot (create_app), so reconcile must leave
+    # them alone; only 'running' work was lost with the dead process.
     store = Storage(settings.db_path)
     store.create_job("q", "Q.mp4", "2026-06-01T00:00:00+00:00")  # queued
     store.create_job("r", "R.mp4", "2026-06-01T00:00:00+00:00")
@@ -56,7 +58,7 @@ def test_reconcile_interrupted(settings):
     store.create_job("d", "D.mp4", "2026-06-01T00:00:00+00:00")
     store.update_status("d", "done")
     count = store.reconcile_interrupted()
-    assert count == 2
-    assert store.get_job("q").status == "interrupted"
+    assert count == 1
+    assert store.get_job("q").status == "queued"
     assert store.get_job("r").status == "interrupted"
     assert store.get_job("d").status == "done"

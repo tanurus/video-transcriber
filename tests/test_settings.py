@@ -16,6 +16,19 @@ def test_load_defaults(monkeypatch):
     assert s.db_path == Path("/data/app.db")
 
 
+def test_blank_env_values_fall_back_to_defaults(monkeypatch):
+    # Blank placeholder lines in .env ("RETAIN_VIDEO_DAYS=") must not crash int().
+    monkeypatch.setenv("DATA_DIR", "")
+    monkeypatch.setenv("RETAIN_VIDEO_DAYS", "")
+    monkeypatch.setenv("MAX_CONTENT_MB", "")
+    monkeypatch.setenv("ALLOWED_EXT", "")
+    s = WebSettings.load()
+    assert s.data_dir == Path("/data")
+    assert s.retain_video_days == 30
+    assert s.max_content_mb == 2048
+    assert "mp4" in s.allowed_ext
+
+
 def test_load_overrides(monkeypatch):
     monkeypatch.setenv("DATA_DIR", "/tmp/d")
     monkeypatch.setenv("RETAIN_VIDEO_DAYS", "7")

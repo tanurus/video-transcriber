@@ -43,6 +43,14 @@ def test_job_page_404(client):
     assert client.get("/job/missing").status_code == 404
 
 
+def test_job_page_shows_error_message(client):
+    client._storage.create_job("jerr", "Bad.mp4", "2026-06-01T00:00:00+00:00")
+    client._storage.update_status("jerr", "error", error="ffmpeg exploded: no audio stream")
+    resp = client.get("/job/jerr")
+    assert resp.status_code == 200
+    assert b"ffmpeg exploded: no audio stream" in resp.data
+
+
 def test_job_api_streams_status_and_lines(client):
     client._storage.create_job("j1", "Clip.mp4", "2026-06-01T00:00:00+00:00")
     client._storage.update_status("j1", "running")

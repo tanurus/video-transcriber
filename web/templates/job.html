@@ -3,6 +3,7 @@
 {% block content %}
 <h1>{{ job.original_name }}</h1>
 <p>Status: <span id="status">{{ job.status }}</span></p>
+<p id="error" class="error" {% if not job.error %}hidden{% endif %}>{{ job.error or "" }}</p>
 <pre id="log"></pre>
 <p id="download" {% if job.status != 'done' %}hidden{% endif %}>
   <a href="{{ url_for('download', job_id=job.id) }}">Download transcript (.txt)</a>

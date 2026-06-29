@@ -11,6 +11,23 @@ from .settings import WebSettings
 from .storage import Storage
 
 
+def _requeue_pending(storage: Storage, settings: WebSettings, job_manager) -> None:
+    """Resubmit jobs that were queued (never started) when the process died.
+
+    Their uploads are still on disk, so re-running them beats forcing the user
+    to upload multi-GB files again. Jobs whose video is gone are interrupted.
+    """
+    for job in storage.list_jobs():
+        if job.status != "queued":
+            continue
+        job_dir = settings.uploads_dir / job.id
+        files = sorted(p for p in job_dir.iterdir() if p.is_file()) if job_dir.is_dir() else []
+        if files:
+            job_manager.submit(job.id, files[0])
+        else:
+            storage.update_status(job.id, "interrupted")
+
+
 def create_app(
     settings: Optional[WebSettings] = None,
     storage: Optional[Storage] = None,
@@ -35,6 +52,8 @@ def create_app(
             transcribe_fn=transcribe_video,
         )
 
+    _requeue_pending(storage, settings, job_manager)
+
     app = Flask(__name__)
     # Flash messages only; on a private tailnet there's no session-security requirement.
     # Prefer an env-provided key; fall back to a random per-process key.
@@ -47,6 +66,6 @@ def create_app(
     register_routes(app)
 
     if start_background:
-        start_cleanup_thread(settings)
+        start_cleanup_thread(settings, storage)
 
     return app

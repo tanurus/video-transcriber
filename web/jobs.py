@@ -51,10 +51,12 @@ class JobManager:
             return list(lines[since:]), len(lines)
 
     def _run(self, job_id: str, video_path: Path) -> None:
-        self.storage.update_status(job_id, "running")
-        self._append_log(job_id, f"--- {Path(video_path).name} ---")
+        # Nothing may escape this method: the executor discards the Future, so
+        # an uncaught exception would silently leave the job stuck forever.
         out_path = self.settings.transcripts_dir / f"{job_id}.txt"
         try:
+            self.storage.update_status(job_id, "running")
+            self._append_log(job_id, f"--- {Path(video_path).name} ---")
             cfg = self.cfg_loader()
             self.transcribe_fn(
                 video_path,
@@ -63,19 +65,29 @@ class JobManager:
                 out_path=out_path,
             )
             rel = out_path.relative_to(self.settings.data_dir)
+            # Final log line before the terminal status: a poll that sees the
+            # terminal status must already see the full log.
+            self._append_log(job_id, "Done.")
             self.storage.update_status(
                 job_id, "done", completed_at=_utcnow_iso(), transcript_path=str(rel).replace("\\", "/")
             )
-            self._append_log(job_id, "Done.")
         except Exception as e:  # noqa: BLE001 - surface any failure as job error
-            self.storage.update_status(job_id, "error", completed_at=_utcnow_iso(), error=str(e))
             self._append_log(job_id, f"Error: {e}")
+            try:
+                self.storage.update_status(job_id, "error", completed_at=_utcnow_iso(), error=str(e))
+            except Exception:  # noqa: BLE001
+                # Storage itself is failing; the log line above is the only signal left.
+                pass
 
 
-def purge_old_videos(settings: WebSettings, now: Optional[float] = None) -> int:
+def purge_old_videos(
+    settings: WebSettings, now: Optional[float] = None, storage: Optional[Storage] = None
+) -> int:
     """Delete upload directories whose mtime is older than the retention window.
 
-    Returns the number of directories removed. Transcripts are never touched.
+    Directories belonging to jobs that are still queued or running are kept
+    regardless of age. One unreadable entry never aborts the sweep. Returns the
+    number of directories removed. Transcripts are never touched.
     """
     if now is None:
         now = time.time()
@@ -85,19 +97,29 @@ def purge_old_videos(settings: WebSettings, now: Optional[float] = None) -> int:
     cutoff = now - settings.retain_video_days * 86400
     removed = 0
     for child in uploads.iterdir():
-        if child.is_dir() and child.stat().st_mtime < cutoff:
+        try:
+            if not child.is_dir() or child.stat().st_mtime >= cutoff:
+                continue
+            if storage is not None:
+                job = storage.get_job(child.name)
+                if job is not None and job.status in ("queued", "running"):
+                    continue
             shutil.rmtree(child, ignore_errors=True)
             removed += 1
+        except Exception:  # noqa: BLE001 - skip the bad entry, keep sweeping
+            continue
     return removed
 
 
-def start_cleanup_thread(settings: WebSettings, interval_seconds: int = 86400) -> threading.Thread:
+def start_cleanup_thread(
+    settings: WebSettings, storage: Optional[Storage] = None, interval_seconds: int = 86400
+) -> threading.Thread:
     """Run an immediate purge, then purge every `interval_seconds`, in a daemon thread."""
 
     def _loop() -> None:
         while True:
             try:
-                purge_old_videos(settings)
+                purge_old_videos(settings, storage=storage)
             except Exception:  # noqa: BLE001 - cleanup must never crash the app
                 pass
             time.sleep(interval_seconds)

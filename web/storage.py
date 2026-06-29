@@ -107,9 +107,13 @@ class Storage:
             conn.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", params)
 
     def reconcile_interrupted(self) -> int:
+        """Mark jobs that were mid-transcription when the process died.
+
+        Only 'running' jobs are interrupted: their partial work is lost. Jobs
+        still 'queued' are left untouched so the app can requeue them at boot.
+        """
         with self._connect() as conn:
             cur = conn.execute(
-                "UPDATE jobs SET status = 'interrupted' "
-                "WHERE status IN ('queued', 'running')"
+                "UPDATE jobs SET status = 'interrupted' WHERE status = 'running'"
             )
             return cur.rowcount

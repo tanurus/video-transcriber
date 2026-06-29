@@ -18,6 +18,7 @@ class Config:
     chunk_target_mb: int = 24
     audio_bitrate: str = "96k"  # ffmpeg format, e.g., "64k", "96k", "128k"
     base_url: Optional[str] = None  # None = OpenAI default
+    language: str = "en"  # forced transcription language (Whisper does not auto-detect here)
 
     @staticmethod
     def load(env_path: Optional[str] = None) -> "Config":
@@ -39,10 +40,13 @@ class Config:
                 "No API key found. Set GROQ_API_KEY or OPENAI_API_KEY in your environment or .env file."
             )
 
-        model = os.getenv("TRANSCRIBE_MODEL", default_model)
-        timeout = int(os.getenv("OPENAI_TIMEOUT", "600"))
-        chunk_target_mb = int(os.getenv("CHUNK_TARGET_MB", "24"))
-        audio_bitrate = os.getenv("AUDIO_BITRATE", "96k")
+        # "or default" (not getenv's default) so blank placeholders in .env
+        # ("OPENAI_TIMEOUT=") behave like unset variables instead of crashing int().
+        model = os.getenv("TRANSCRIBE_MODEL") or default_model
+        timeout = int(os.getenv("OPENAI_TIMEOUT") or "600")
+        chunk_target_mb = int(os.getenv("CHUNK_TARGET_MB") or "24")
+        audio_bitrate = os.getenv("AUDIO_BITRATE") or "96k"
+        language = os.getenv("TRANSCRIBE_LANGUAGE") or "en"
 
         return Config(
             openai_api_key=api_key,
@@ -51,4 +55,5 @@ class Config:
             chunk_target_mb=chunk_target_mb,
             audio_bitrate=audio_bitrate,
             base_url=base_url,
+            language=language,
         )

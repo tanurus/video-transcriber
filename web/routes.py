@@ -48,7 +48,11 @@ def register_routes(app: Flask) -> None:
             return redirect(url_for("index"))
 
         job_id = uuid.uuid4().hex
-        safe_name = secure_filename(filename) or f"upload.{ext}"
+        safe_name = secure_filename(filename)
+        # secure_filename strips non-ASCII: "Видео.mp4" becomes "mp4" (no dot).
+        # The transcription API sniffs format by extension, so make sure one survives.
+        if not safe_name or "." not in safe_name:
+            safe_name = f"upload.{ext}"
         dest_dir = settings.uploads_dir / job_id
         dest_dir.mkdir(parents=True, exist_ok=True)
         video_path = dest_dir / safe_name

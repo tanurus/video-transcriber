@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import os
 import queue
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional, Sequence
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -22,23 +24,20 @@ from .audio import extract_audio, chunk_audio_by_size
 from .whisper_client import WhisperClient
 
 
-DEFAULT_FILENAME = "with Vlass (updated priorities for Priceline and Arangrant) 2025-09-26 14-06-17.mkv"
-
-
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract audio from video and transcribe via OpenAI")
     parser.add_argument(
         "video",
         nargs="?",
-        default=DEFAULT_FILENAME,
-        help="Path to the video file (default: the specified MKV filename in current directory)",
+        default=None,
+        help="Path to the video file (omit only with --gui)",
     )
     parser.add_argument(
         "--gui",
         action="store_true",
         help="Launch the graphical interface for selecting a video and viewing progress",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def transcribe_video(
@@ -96,7 +95,13 @@ def transcribe_video(
             log("Note: Without ffmpeg, large files cannot be chunked; upload may fail if too large.")
             audio_files = [video_path]
 
-        client = WhisperClient(api_key=cfg.openai_api_key, model=cfg.model, timeout=cfg.timeout, base_url=cfg.base_url)
+        client = WhisperClient(
+            api_key=cfg.openai_api_key,
+            model=cfg.model,
+            timeout=cfg.timeout,
+            base_url=cfg.base_url,
+            language=getattr(cfg, "language", "en"),
+        )
 
         log("Transcribing...")
         transcript_parts = []
@@ -113,7 +118,11 @@ def transcribe_video(
 
         out_txt = Path(out_path) if out_path else video_path.with_suffix(".txt")
         out_txt.parent.mkdir(parents=True, exist_ok=True)
-        out_txt.write_text(transcript, encoding="utf-8")
+        # Write via temp file + atomic rename so a crash mid-write can never
+        # leave a truncated transcript at the expected output path.
+        tmp_txt = out_txt.with_name(out_txt.name + ".tmp")
+        tmp_txt.write_text(transcript, encoding="utf-8")
+        os.replace(tmp_txt, out_txt)
         log(f"Transcript saved to {out_txt}")
         return out_txt
     finally:
@@ -122,7 +131,35 @@ def transcribe_video(
             shutil.rmtree(d, ignore_errors=True)
 
 
+def open_path(path: Path | str) -> None:
+    """Open a file or folder in the OS default handler."""
+    path = Path(path)
+    if sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]  # Windows-only
+    elif sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
+
+
+def reveal_path(path: Path | str) -> None:
+    """Reveal a file in the OS file manager, selecting it when supported."""
+    path = Path(path)
+    if sys.platform == "win32":
+        # explorer returns a non-zero exit code even on success, so don't check.
+        subprocess.run(["explorer", "/select,", str(path)], check=False)
+    elif sys.platform == "darwin":
+        subprocess.run(["open", "-R", str(path)], check=False)
+    else:
+        # No portable "select file" on Linux; open the containing folder.
+        open_path(path.parent)
+
+
 def run_cli(args: argparse.Namespace) -> int:
+    if not args.video:
+        print("Error: provide a path to a video file, or use --gui.", file=sys.stderr)
+        return 2
+
     video_path = Path(args.video)
     if not video_path.is_absolute():
         video_path = Path.cwd() / video_path
@@ -155,7 +192,8 @@ class TranscriptionApp:
         self.root.geometry("780x580")
 
         self.status_var = tk.StringVar(value="Idle")
-        self._queue_paths: dict[str, Path] = {}  # treeview iid -> full path
+        self._queue_paths: dict[str, Path] = {}  # treeview iid -> source video path
+        self._output_paths: dict[str, Path] = {}  # treeview iid -> saved transcript .txt
         self._next_idx: int = 1
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
@@ -197,7 +235,7 @@ class TranscriptionApp:
             columns=("num", "file", "status"),
             show="headings",
             height=8,
-            selectmode="none",
+            selectmode="browse",
         )
         self.queue_tree.heading("num", text="#")
         self.queue_tree.heading("file", text="File")
@@ -210,6 +248,22 @@ class TranscriptionApp:
         self.queue_tree.configure(yscrollcommand=vsb.set)
         self.queue_tree.pack(side="left", fill="x", expand=True)
         vsb.pack(side="left", fill="y")
+        self.queue_tree.bind("<<TreeviewSelect>>", lambda _e: self._refresh_actions())
+
+        actions = ttk.Frame(main)
+        actions.pack(fill="x", pady=(0, 8))
+        self.copy_btn = ttk.Button(actions, text="Copy transcript", command=self._copy_transcript)
+        self.copy_btn.pack(side="left")
+        self.open_btn = ttk.Button(actions, text="Open file", command=self._open_transcript)
+        self.open_btn.pack(side="left", padx=(8, 0))
+        self.folder_btn = ttk.Button(actions, text="Open folder", command=self._reveal_transcript)
+        self.folder_btn.pack(side="left", padx=(8, 0))
+        ttk.Label(
+            actions,
+            text="Select a completed file to copy or open its transcript.",
+            foreground="#6c757d",
+        ).pack(side="left", padx=(12, 0))
+        self._refresh_actions()
 
         log_label = ttk.Label(main, text="Status log", font=("Segoe UI", 10, "bold"))
         log_label.pack(anchor="w")
@@ -273,6 +327,7 @@ class TranscriptionApp:
                 self._log(f"\n--- {video_path.name} ---")
                 try:
                     out_path = transcribe_video(video_path, cfg, logger=self._log)
+                    self._output_paths[iid] = out_path
                     self._set_item_status(iid, "Done")
                     self._log(f"Saved to {out_path}")
                 except Exception as e:
@@ -281,12 +336,64 @@ class TranscriptionApp:
         finally:
             self._set_status("Completed")
             self._enable_start()
+            self.root.after(0, self._refresh_actions)
 
     def _set_item_status(self, iid: str, status: str) -> None:
         self.root.after(0, lambda i=iid, s=status: self.queue_tree.set(i, "status", s))
 
     def _enable_start(self) -> None:
         self.root.after(0, lambda: self.start_btn.state(["!disabled"]))
+
+    def _selected_transcript(self) -> Path | None:
+        """Return the saved .txt for the selected row if it is Done and on disk."""
+        selection = self.queue_tree.selection()
+        if not selection:
+            return None
+        iid = selection[0]
+        if self.queue_tree.set(iid, "status") != "Done":
+            return None
+        out_path = self._output_paths.get(iid)
+        if out_path is None or not out_path.exists():
+            return None
+        return out_path
+
+    def _refresh_actions(self) -> None:
+        """Enable the transcript buttons only when a usable .txt is selected."""
+        state = "!disabled" if self._selected_transcript() else "disabled"
+        for btn in (self.copy_btn, self.open_btn, self.folder_btn):
+            btn.state([state])
+
+    def _copy_transcript(self) -> None:
+        out_path = self._selected_transcript()
+        if out_path is None:
+            return
+        try:
+            text = out_path.read_text(encoding="utf-8")
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()  # flush to the OS clipboard while the app is open
+        except Exception as e:
+            messagebox.showerror("Copy failed", str(e))
+            return
+        self._set_status(f"Copied {out_path.name}")
+
+    def _open_transcript(self) -> None:
+        out_path = self._selected_transcript()
+        if out_path is None:
+            return
+        try:
+            open_path(out_path)
+        except Exception as e:
+            messagebox.showerror("Open failed", str(e))
+
+    def _reveal_transcript(self) -> None:
+        out_path = self._selected_transcript()
+        if out_path is None:
+            return
+        try:
+            reveal_path(out_path)
+        except Exception as e:
+            messagebox.showerror("Open folder failed", str(e))
 
     def _set_status(self, text: str) -> None:
         self.root.after(0, lambda: self.status_var.set(text))

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(winget install --id=Gyan.FFmpeg --accept-package-agreements --accept-source-agreements)",
+      "PowerShell(Get-Command ffmpeg -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; \\(Get-ItemProperty \"HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment\" -Name Path\\).Path -split \";\" | Select-String -Pattern \"ffmpeg\" -SimpleMatch)",
+      "PowerShell(\\(Get-ItemProperty \"HKLM:\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment\" -Name Path\\).Path -split \";\" | Select-String -Pattern \"ff\" -SimpleMatch)",
+      "PowerShell(\\(Get-ItemProperty \"HKCU:\\\\Environment\" -Name Path -ErrorAction SilentlyContinue\\).Path -split \";\" | Select-String -Pattern \"ff\" -SimpleMatch)",
+      "PowerShell(Stop-Process -Name python -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; $ffmpegPath = \"C:\\\\Users\\\\andrew.t\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\\\ffmpeg-8.1.1-full_build\\\\bin\"; $env:PATH = \"$ffmpegPath;$env:PATH\"; Start-Process python -ArgumentList \"-m\", \"app.main\", \"--gui\" -WorkingDirectory \"c:\\\\Users\\\\andrew.t\\\\Documents\\\\Python\\\\audio_video_transcript\" -Environment @{PATH=\"$ffmpegPath;$env:PATH\"; OPENAI_API_KEY=$env:OPENAI_API_KEY})",
+      "PowerShell(Stop-Process -Name python -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; $ffmpegPath = \"C:\\\\Users\\\\andrew.t\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages\\\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\\\ffmpeg-8.1.1-full_build\\\\bin\"; $env:PATH = \"$ffmpegPath;$env:PATH\"; Start-Process python -ArgumentList \"-m\", \"app.main\", \"--gui\" -WorkingDirectory \"c:\\\\Users\\\\andrew.t\\\\Documents\\\\Python\\\\audio_video_transcript\")"
+    ]
+  }
+}

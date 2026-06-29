@@ -3,6 +3,7 @@ header a { text-decoration: none; margin-right: .25rem; }
 header { margin-bottom: 1.5rem; color: #555; }
 h1 { font-size: 1.4rem; }
 .flash { background: #fde2e1; border: 1px solid #f5b5b1; padding: .5rem 1rem; border-radius: 6px; }
+.error { background: #fde2e1; border: 1px solid #f5b5b1; color: #8c1d18; padding: .5rem 1rem; border-radius: 6px; }
 .recent { line-height: 1.8; }
 #log { background: #0f1117; color: #d6deeb; padding: 1rem; border-radius: 6px; min-height: 8rem; white-space: pre-wrap; }
 button { padding: .4rem .9rem; }

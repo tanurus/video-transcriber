@@ -51,6 +51,85 @@ def test_run_error(settings):
     assert "ffmpeg exploded" in job.error
 
 
+class FlakyStorage:
+    """Delegates to a real Storage but fails the first update_status call."""
+
+    def __init__(self, real):
+        self._real = real
+        self.failures_left = 1
+
+    def update_status(self, *args, **kwargs):
+        if self.failures_left > 0:
+            self.failures_left -= 1
+            raise RuntimeError("database is locked")
+        return self._real.update_status(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class DeadStorage:
+    """Every status write fails — simulates a full disk / dead database."""
+
+    def update_status(self, *args, **kwargs):
+        raise RuntimeError("disk full")
+
+
+def test_run_survives_transient_storage_failure(settings):
+    real = Storage(settings.db_path)
+    real.create_job("j5", "clip.mp4", "2026-06-01T00:00:00+00:00")
+    video = _make_video(settings, job_id="j5")
+    store = FlakyStorage(real)
+
+    mgr = JobManager(store, settings, cfg_loader=lambda: None, transcribe_fn=lambda *a, **k: None)
+    mgr._run("j5", video)  # must not raise into the (discarded) Future
+
+    job = real.get_job("j5")
+    assert job.status == "error"
+    assert "locked" in job.error
+
+
+def test_run_never_raises_even_when_storage_is_dead(settings):
+    mgr = JobManager(DeadStorage(), settings, cfg_loader=lambda: None, transcribe_fn=lambda *a, **k: None)
+    mgr._run("j6", settings.uploads_dir / "j6" / "x.mp4")  # no exception may escape
+
+    lines, _ = mgr.get_logs("j6")
+    assert any(line.startswith("Error:") for line in lines)
+
+
+def test_final_log_line_lands_before_terminal_status(settings):
+    """A poll that sees a terminal status must already see the final log line."""
+    real = Storage(settings.db_path)
+    real.create_job("j7", "clip.mp4", "2026-06-01T00:00:00+00:00")
+    video = _make_video(settings, job_id="j7")
+
+    captured = {}
+
+    class SnoopingStorage:
+        def __init__(self, real_storage):
+            self._real = real_storage
+
+        def update_status(self, job_id, status, **kwargs):
+            if status in ("done", "error"):
+                captured["logs_at_terminal_write"] = mgr.get_logs(job_id)[0]
+            return self._real.update_status(job_id, status, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    def fake_transcribe(video_path, cfg, logger=None, out_path=None):
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text("t", encoding="utf-8")
+        return Path(out_path)
+
+    mgr = JobManager(
+        SnoopingStorage(real), settings, cfg_loader=lambda: None, transcribe_fn=fake_transcribe
+    )
+    mgr._run("j7", video)
+
+    assert "Done." in captured["logs_at_terminal_write"]
+
+
 def test_get_logs_since(settings):
     store = Storage(settings.db_path)
     mgr = JobManager(store, settings, cfg_loader=lambda: None, transcribe_fn=lambda *a, **k: None)

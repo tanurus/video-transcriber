@@ -58,3 +58,15 @@ def test_upload_bad_extension_rejected(client):
     assert resp.status_code == 302
     assert client._storage.list_jobs() == []
     assert client._jobs.submitted == []
+
+
+def test_upload_non_ascii_filename_keeps_extension(client):
+    # secure_filename strips non-ASCII; "Видео.mp4" must not be saved as
+    # an extensionless file called "mp4" (the API sniffs format by extension).
+    data = {"video": (io.BytesIO(b"x"), "Видео.mp4")}
+    resp = client.post("/upload", data=data, content_type="multipart/form-data")
+    assert resp.status_code == 302
+    job_id = client._storage.list_jobs()[0].id
+    saved = list((client._settings.uploads_dir / job_id).iterdir())
+    assert len(saved) == 1
+    assert saved[0].suffix == ".mp4"
