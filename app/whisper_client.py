@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Iterable, List
 
 from openai import (
     APIConnectionError,
@@ -17,11 +18,10 @@ _RETRYABLE_ERRORS = (RateLimitError, APITimeoutError, APIConnectionError, Intern
 
 
 class WhisperClient:
-    def __init__(self, api_key: str, model: str = "whisper-large-v3-turbo", timeout: int = 600, base_url: str | None = None, language: str = "en") -> None:
+    def __init__(self, api_key: str, model: str = "whisper-large-v3", timeout: int = 600, base_url: str | None = None) -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
         self.timeout = timeout
-        self.language = language
 
     def transcribe_file(self, audio_file: str | Path, response_format: str = "text") -> str:
         retries = 3
@@ -29,11 +29,15 @@ class WhisperClient:
         for attempt in range(1, retries + 1):
             try:
                 with open(audio_file, "rb") as f:
-                    resp = self.client.audio.transcriptions.create(
+                    # Use the translations endpoint so the output is ALWAYS English,
+                    # regardless of the spoken language (e.g. Russian / Romanian).
+                    # temperature=0 minimises Whisper's repetition/hallucination loops.
+                    # NOTE: Groq supports translations only with whisper-large-v3.
+                    resp = self.client.audio.translations.create(
                         model=self.model,
                         file=f,
                         response_format=response_format,
-                        language=self.language,
+                        temperature=0,
                     )
                 # For response_format="text", resp is a string-like object with .text
                 if hasattr(resp, "text") and isinstance(resp.text, str):
@@ -49,3 +53,11 @@ class WhisperClient:
                     continue
                 raise
         raise RuntimeError("unreachable: retry loop exited without returning or raising")
+
+    def transcribe_many(self, audio_files: Iterable[str | Path]) -> str:
+        parts: List[str] = []
+        for idx, p in enumerate(audio_files, start=1):
+            text = self.transcribe_file(p)
+            header = f"\n\n--- Segment {idx} ---\n\n"
+            parts.append(header + text.strip())
+        return "".join(parts).strip() or ""

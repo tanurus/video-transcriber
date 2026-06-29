@@ -5,6 +5,7 @@
   var statusEl = document.getElementById("status");
   var downloadEl = document.getElementById("download");
   var errorEl = document.getElementById("error");
+  var spinnerEl = document.getElementById("spinner");
   var since = 0;
   var terminal = { done: 1, error: 1, interrupted: 1 };
 
@@ -22,7 +23,10 @@
           errorEl.removeAttribute("hidden");
         }
         if (data.download_ready) { downloadEl.removeAttribute("hidden"); }
-        if (terminal[data.status]) { return; }
+        if (terminal[data.status]) {
+          if (spinnerEl) { spinnerEl.setAttribute("hidden", ""); }
+          return;
+        }
         setTimeout(poll, 1000);
       })
       .catch(function () { setTimeout(poll, 2000); });

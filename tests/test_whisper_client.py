@@ -34,7 +34,7 @@ def _make_client(monkeypatch, tmp_path, errors):
         return SimpleNamespace(text="ok")
 
     client.client = SimpleNamespace(
-        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))
+        audio=SimpleNamespace(translations=SimpleNamespace(create=fake_create))
     )
     audio_file = tmp_path / "a.mp3"
     audio_file.write_bytes(b"x")
@@ -79,14 +79,10 @@ def test_connection_error_retried(monkeypatch, tmp_path):
     assert calls["n"] == 2
 
 
-def test_language_sent_to_api(monkeypatch, tmp_path):
+def test_uses_translations_endpoint_at_temperature_zero(monkeypatch, tmp_path):
+    # The translations endpoint forces English output regardless of the spoken
+    # language; temperature=0 curbs Whisper's repetition/hallucination loops.
     client, calls, f = _make_client(monkeypatch, tmp_path, [])
     client.transcribe_file(f)
-    assert calls["kwargs"]["language"] == "en"
-
-
-def test_language_override(monkeypatch, tmp_path):
-    client, calls, f = _make_client(monkeypatch, tmp_path, [])
-    client.language = "de"
-    client.transcribe_file(f)
-    assert calls["kwargs"]["language"] == "de"
+    assert calls["kwargs"]["temperature"] == 0
+    assert "language" not in calls["kwargs"]

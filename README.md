@@ -5,8 +5,8 @@ A small Python tool that extracts audio from a video file and sends it to an Ope
 ## Features
 - Extract audio from most video formats via ffmpeg
 - Automatically chunk large audio into smaller parts when needed
-- Calls an OpenAI-compatible Transcriptions API — Groq (default model: `whisper-large-v3-turbo`) or OpenAI (default model: `gpt-4o-transcribe`)
-- Transcription language is pinned to English (`en`) by default; override with `TRANSCRIBE_LANGUAGE`
+- Calls an OpenAI-compatible Transcriptions API — Groq (default model: `whisper-large-v3`) or OpenAI (default model: `gpt-4o-transcribe`)
+- Output is always English: the translations endpoint transcribes and translates any spoken language (Russian, Romanian, …) into English
 - Saves transcript in the same folder as the input video
 - Desktop GUI: select a finished file to copy its transcript to the clipboard, open the `.txt`, or reveal it in the file manager
 
@@ -51,13 +51,12 @@ The transcript is written as a `.txt` file with the same base name in the same f
 You can customize behavior via environment variables (in your shell or `.env`, see `.env.example`):
 
 - `GROQ_API_KEY` / `OPENAI_API_KEY` (one required): If both are set, `GROQ_API_KEY` takes precedence and requests go to Groq's API.
-- `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3-turbo` on Groq, `gpt-4o-transcribe` on OpenAI. Make sure the model you set exists on the provider in use.
-- `TRANSCRIBE_LANGUAGE` (optional): Transcription language as an ISO-639-1 code. Defaults to `en` (forced English).
+- `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3` on Groq, `gpt-4o-transcribe` on OpenAI. On Groq, keep `whisper-large-v3` — it is the only model that supports the translations endpoint. Make sure the model you set exists on the provider in use.
 - `OPENAI_TIMEOUT` (optional): Request timeout in seconds, default 600.
 - `CHUNK_TARGET_MB` (optional): Target max size per audio chunk before uploading, default 24 (MB).
 - `AUDIO_BITRATE` (optional): MP3 bitrate used for export (e.g., `64k`, `96k`, `128k`). Default `96k`.
 
-Note: the transcription language is intentionally forced to English by default — Whisper does not auto-detect here. Non-English audio will come out wrong unless you set `TRANSCRIBE_LANGUAGE` accordingly.
+Note: output is always English. The app calls the translations endpoint, which translates any spoken language into English, so there is no language setting to configure.
 
 ## Web app on a VPS (browser access over Tailscale)
 

@@ -100,7 +100,6 @@ def transcribe_video(
             model=cfg.model,
             timeout=cfg.timeout,
             base_url=cfg.base_url,
-            language=getattr(cfg, "language", "en"),
         )
 
         log("Transcribing...")

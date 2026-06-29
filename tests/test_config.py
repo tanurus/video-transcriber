@@ -67,4 +67,6 @@ def test_groq_key_takes_precedence(monkeypatch, env_file):
     cfg = Config.load(env_path=env_file)
     assert cfg.openai_api_key == "gsk-test"
     assert cfg.base_url == GROQ_BASE_URL
-    assert cfg.model == "whisper-large-v3-turbo"
+    # whisper-large-v3 (not turbo) is the only Groq model supporting the
+    # translations endpoint WhisperClient uses to force English output.
+    assert cfg.model == "whisper-large-v3"
