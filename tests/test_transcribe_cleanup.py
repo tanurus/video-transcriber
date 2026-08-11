@@ -27,7 +27,7 @@ def test_transcribe_cleans_temp_work_dir(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def transcribe_file(self, f):
+        def transcribe_file(self, f, logger=None):
             return "txt"
 
     monkeypatch.setattr(m, "WhisperClient", FakeClient)
@@ -62,7 +62,7 @@ def test_transcribe_cleans_temp_dir_on_failure(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def transcribe_file(self, f):
+        def transcribe_file(self, f, logger=None):
             raise RuntimeError("api down")
 
     monkeypatch.setattr(m, "WhisperClient", BoomClient)

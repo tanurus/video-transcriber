@@ -132,3 +132,61 @@ def test_extract_audio_surfaces_ffmpeg_stderr(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="Unknown decoder"):
         audio.extract_audio(video, out_dir=tmp_path)
+
+
+# --- silence-aware chunking (parsing + cut-point math, pure functions) --------
+
+def test_parse_silences_extracts_duration_and_intervals():
+    stderr = (
+        "  Duration: 00:03:20.50, start: 0.000000, bitrate: 96 kb/s\n"
+        "[silencedetect @ 0x1] silence_start: 44.2\n"
+        "[silencedetect @ 0x1] silence_end: 45.1 | silence_duration: 0.9\n"
+        "[silencedetect @ 0x1] silence_start: 89.0\n"
+        "[silencedetect @ 0x1] silence_end: 90.0 | silence_duration: 1.0\n"
+    )
+    duration, silences = audio._parse_silences(stderr)
+    assert duration == pytest.approx(200.5)
+    assert silences == [(44.2, 45.1), (89.0, 90.0)]
+
+
+def test_parse_silences_drops_unclosed_trailing_start():
+    # Audio ends mid-silence: a silence_start with no matching silence_end yields
+    # no usable interior cut point, so it must be discarded.
+    stderr = "Duration: 00:00:50.00, start: 0.0\nsilence_start: 30.0\n"
+    duration, silences = audio._parse_silences(stderr)
+    assert duration == pytest.approx(50.0)
+    assert silences == []
+
+
+def test_parse_silences_without_duration_returns_none():
+    duration, silences = audio._parse_silences("no banner here\n")
+    assert duration is None
+    assert silences == []
+
+
+def test_compute_cut_points_short_audio_is_single_chunk():
+    assert audio._compute_cut_points(60.0, [], target_sec=45, max_sec=90) == []
+
+
+def test_compute_cut_points_snaps_to_pause_past_target():
+    # 200s audio; pauses sit at midpoints 50.5 and 95.5. The first is >= target
+    # (45) and <= max (90), so the first cut snaps to that pause rather than a
+    # hard time cut.
+    cuts = audio._compute_cut_points(
+        200.0, [(50.0, 51.0), (95.0, 96.0)], target_sec=45, max_sec=90
+    )
+    assert cuts[0] == pytest.approx(50.5)
+    assert cuts[1] == pytest.approx(95.5)
+
+
+def test_compute_cut_points_forces_max_when_no_pause():
+    # No pauses at all -> hard cuts every max_sec so chunks stay bounded.
+    cuts = audio._compute_cut_points(300.0, [], target_sec=45, max_sec=90)
+    assert cuts == [90.0, 180.0, 270.0]
+
+
+def test_compute_cut_points_ignores_pauses_before_target():
+    # A very early pause (before target_sec accumulates) must not cause a tiny
+    # first chunk; the cut should still land near max.
+    cuts = audio._compute_cut_points(120.0, [(5.0, 6.0)], target_sec=45, max_sec=90)
+    assert cuts[0] == pytest.approx(90.0)

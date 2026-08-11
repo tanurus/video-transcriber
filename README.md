@@ -4,11 +4,12 @@ A small Python tool that extracts audio from a video file and sends it to an Ope
 
 ## Features
 - Extract audio from most video formats via ffmpeg
-- Automatically chunk large audio into smaller parts when needed
+- Silence-aware chunking: audio is split into short (~45–90s) segments at natural pauses, transcribed in parallel, and rejoined. Short chunks let Whisper re-detect the language on each utterance, which keeps multilingual meetings (e.g. Romanian + Ukrainian + Russian) from being garbled by a single wrong language
+- Confidence filtering: no-speech and repetition-loop hallucinations are dropped using Whisper's per-segment stats (Groq `whisper-large-v3`), and every drop is logged
 - Calls an OpenAI-compatible Transcriptions API — Groq (default model: `whisper-large-v3`) or OpenAI (default model: `gpt-4o-transcribe`)
-- Output is always English: the translations endpoint transcribes and translates any spoken language (Russian, Romanian, …) into English
+- Transcribes in the spoken language: Whisper auto-detects the language of the recording (Russian, Romanian, …) and the transcript stays in that language for best accuracy
 - Saves transcript in the same folder as the input video
-- Desktop GUI: select a finished file to copy its transcript to the clipboard, open the `.txt`, or reveal it in the file manager
+- Desktop GUI: select a finished file to copy its transcript to the clipboard, open the `.txt`, or reveal it in the file manager (no console window flashes when ffmpeg runs)
 
 ## Requirements
 - Python 3.9+
@@ -51,12 +52,21 @@ The transcript is written as a `.txt` file with the same base name in the same f
 You can customize behavior via environment variables (in your shell or `.env`, see `.env.example`):
 
 - `GROQ_API_KEY` / `OPENAI_API_KEY` (one required): If both are set, `GROQ_API_KEY` takes precedence and requests go to Groq's API.
-- `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3` on Groq, `gpt-4o-transcribe` on OpenAI. On Groq, keep `whisper-large-v3` — it is the only model that supports the translations endpoint. Make sure the model you set exists on the provider in use.
+- `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3` on Groq, `gpt-4o-transcribe` on OpenAI — the highest-accuracy option on each provider. Make sure the model you set exists on the provider in use.
+- `TRANSCRIBE_LANGUAGE` (optional): ISO-639-1 code (e.g. `ru`, `ro`) used as a hint when you know the spoken language up front. Leave unset to let Whisper auto-detect.
 - `OPENAI_TIMEOUT` (optional): Request timeout in seconds, default 600.
-- `CHUNK_TARGET_MB` (optional): Target max size per audio chunk before uploading, default 24 (MB).
 - `AUDIO_BITRATE` (optional): MP3 bitrate used for export (e.g., `64k`, `96k`, `128k`). Default `96k`.
+- `CHUNK_TARGET_MB` (optional): Safety-net max chunk size in MB (default 24). Only used if silence-aware chunking fails.
 
-Note: output is always English. The app calls the translations endpoint, which translates any spoken language into English, so there is no language setting to configure.
+Silence-aware chunking (leave `TRANSCRIBE_LANGUAGE` unset for mixed-language audio):
+- `CHUNK_TARGET_SEC` (default 45): aim to cut a segment around here, snapped to the nearest pause.
+- `CHUNK_MAX_SEC` (default 90): force a cut by here even without a pause.
+- `SILENCE_NOISE_DB` (default `-30dB`) / `SILENCE_MIN_SEC` (default 0.5): `silencedetect` tuning; raise the dB (e.g. `-25dB`) for noisier rooms.
+- `MAX_CONCURRENCY` (default 4): how many segments to transcribe in parallel (keep modest for Groq rate limits).
+
+Hallucination filtering (whisper models only): `NO_SPEECH_THRESHOLD` (0.6), `LOGPROB_THRESHOLD` (-1.0), `COMPRESSION_RATIO_THRESHOLD` (2.4) — Whisper's own defaults, override to tune.
+
+Note: the transcript is written in the language spoken in the recording. Transcribing natively is more accurate than translating to English on the fly. For a mixed-language recording, keep everything native and let a downstream LLM translate/summarize the finished transcript — that preserves far more than Whisper's translate mode.
 
 ## Web app on a VPS (browser access over Tailscale)
 

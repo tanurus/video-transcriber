@@ -30,7 +30,7 @@ def test_transcript_written_via_atomic_replace(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def transcribe_file(self, f):
+        def transcribe_file(self, f, logger=None):
             return "txt"
 
     monkeypatch.setattr(m, "WhisperClient", FakeClient)

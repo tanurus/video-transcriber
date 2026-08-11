@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 try:
@@ -20,8 +21,8 @@ except ImportError:  # headless environments (e.g. the Docker server image) have
 from tqdm import tqdm
 
 from .config import Config
-from .audio import extract_audio, chunk_audio_by_size
-from .whisper_client import WhisperClient
+from .audio import extract_audio, chunk_audio_by_silence, chunk_audio_by_size
+from .whisper_client import SegmentFilter, WhisperClient
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -70,21 +71,44 @@ def transcribe_video(
 
         audio_files = []
         if not use_video_directly:
-            try:
-                size_mb = audio_path.stat().st_size / (1024 * 1024)
-            except Exception:
-                size_mb = cfg.chunk_target_mb + 1  # force chunk if unknown
-
             audio_files = [audio_path]
-            if size_mb > cfg.chunk_target_mb:
-                log(f"Audio is {size_mb:.1f} MB; chunking into ~{cfg.chunk_target_mb} MB segments...")
+            log("Splitting audio into silence-aware segments (better per-segment language detection)...")
+            try:
+                audio_files = chunk_audio_by_silence(
+                    audio_path,
+                    target_sec=cfg.chunk_target_sec,
+                    max_sec=cfg.chunk_max_sec,
+                    noise_db=cfg.silence_noise_db,
+                    min_silence_sec=cfg.silence_min_sec,
+                )
+            except Exception as e:
+                # Fall back to the old size-based split so we never regress to no
+                # chunking at all on a large file.
+                log(f"Silence-based chunking failed ({e}); falling back to size-based chunking...")
                 try:
-                    audio_files = chunk_audio_by_size(audio_path, target_mb=cfg.chunk_target_mb, bitrate=cfg.audio_bitrate)
-                    if audio_files and audio_files[0].parent != temp_dir:
-                        chunk_dirs.append(audio_files[0].parent)
-                except Exception as e:
-                    log(f"Chunking failed (continuing with single file): {e}")
+                    size_mb = audio_path.stat().st_size / (1024 * 1024)
+                except Exception:
+                    size_mb = cfg.chunk_target_mb + 1  # force chunk if unknown
+                if size_mb > cfg.chunk_target_mb:
+                    try:
+                        audio_files = chunk_audio_by_size(
+                            audio_path, target_mb=cfg.chunk_target_mb, bitrate=cfg.audio_bitrate
+                        )
+                    except Exception as e2:
+                        log(f"Chunking failed (continuing with single file): {e2}")
+                        audio_files = [audio_path]
+                else:
                     audio_files = [audio_path]
+
+            # The chunkers write splits into their own temp dir; track it for
+            # cleanup. Only when a split actually happened (len > 1) is there a
+            # separate dir — a single unsplit file still lives in temp_dir.
+            if len(audio_files) > 1 and audio_files[0].parent != temp_dir:
+                chunk_dirs.append(audio_files[0].parent)
+            if len(audio_files) > 1:
+                log(f"Split into {len(audio_files)} segments.")
+            else:
+                log("Audio short enough to transcribe as a single segment.")
         else:
             try:
                 size_mb = video_path.stat().st_size / (1024 * 1024)
@@ -100,20 +124,35 @@ def transcribe_video(
             model=cfg.model,
             timeout=cfg.timeout,
             base_url=cfg.base_url,
+            language=cfg.language,
+            segment_filter=SegmentFilter(
+                no_speech_threshold=cfg.no_speech_threshold,
+                logprob_threshold=cfg.logprob_threshold,
+                compression_ratio_threshold=cfg.compression_ratio_threshold,
+            ),
         )
 
-        log("Transcribing...")
-        transcript_parts = []
-        iterator = enumerate(audio_files, start=1)
         total_segments = len(audio_files)
-        if use_tqdm:
-            iterator = enumerate(tqdm(audio_files, desc="Segments"), start=1)
-        for idx, f in iterator:
-            log(f"Transcribing segment {idx}/{total_segments}: {f.name}")
-            text = client.transcribe_file(f)
-            transcript_parts.append(text.strip())
+        workers = max(1, min(cfg.max_concurrency, total_segments))
+        log(f"Transcribing {total_segments} segment(s), up to {workers} in parallel...")
+        # Results are keyed by index so the transcript stays in audio order even
+        # though segments finish out of order.
+        results: list[str] = [""] * total_segments
+        completed = 0
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            future_to_idx = {
+                ex.submit(client.transcribe_file, f, log): i for i, f in enumerate(audio_files)
+            }
+            completion = as_completed(future_to_idx)
+            if use_tqdm:
+                completion = tqdm(completion, total=total_segments, desc="Segments")
+            for fut in completion:
+                idx = future_to_idx[fut]
+                results[idx] = fut.result().strip()  # propagate a segment error to the caller
+                completed += 1
+                log(f"Segment {completed}/{total_segments} done.")
 
-        transcript = "\n\n".join(transcript_parts).strip()
+        transcript = "\n\n".join(part for part in results if part).strip()
 
         out_txt = Path(out_path) if out_path else video_path.with_suffix(".txt")
         out_txt.parent.mkdir(parents=True, exist_ok=True)

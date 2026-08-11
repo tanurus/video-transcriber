@@ -17,7 +17,7 @@ def test_transcribe_writes_to_out_path(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def transcribe_file(self, f):
+        def transcribe_file(self, f, logger=None):
             return "hello world"
 
     monkeypatch.setattr(m, "WhisperClient", FakeClient)
@@ -42,7 +42,7 @@ def test_transcribe_defaults_next_to_video(tmp_path, monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def transcribe_file(self, f):
+        def transcribe_file(self, f, logger=None):
             return "abc"
 
     monkeypatch.setattr(m, "WhisperClient", FakeClient)
