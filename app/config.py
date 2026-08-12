@@ -23,8 +23,8 @@ class Config:
     # Silence-aware chunking. Short chunks let Whisper re-detect the language on
     # each utterance, which is what keeps multilingual meetings from being locked
     # into (and garbled by) whichever language the first 30s happened to be.
-    chunk_target_sec: int = 45  # aim to cut around here, snapped to a pause
-    chunk_max_sec: int = 90  # force a cut by here even without a pause
+    chunk_target_sec: int = 25  # aim to cut around here, snapped to a pause
+    chunk_max_sec: int = 40  # force a cut by here even without a pause
     silence_noise_db: str = "-30dB"  # ffmpeg silencedetect noise floor
     silence_min_sec: float = 0.5  # min pause length to count as a cut point
 
@@ -68,8 +68,8 @@ class Config:
         audio_bitrate = os.getenv("AUDIO_BITRATE") or "96k"
         language = os.getenv("TRANSCRIBE_LANGUAGE") or None
 
-        chunk_target_sec = int(os.getenv("CHUNK_TARGET_SEC") or "45")
-        chunk_max_sec = int(os.getenv("CHUNK_MAX_SEC") or "90")
+        chunk_target_sec = int(os.getenv("CHUNK_TARGET_SEC") or "25")
+        chunk_max_sec = int(os.getenv("CHUNK_MAX_SEC") or "40")
         silence_noise_db = os.getenv("SILENCE_NOISE_DB") or "-30dB"
         silence_min_sec = float(os.getenv("SILENCE_MIN_SEC") or "0.5")
         max_concurrency = max(1, int(os.getenv("MAX_CONCURRENCY") or "4"))

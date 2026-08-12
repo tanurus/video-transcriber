@@ -82,8 +82,8 @@ def test_groq_key_takes_precedence(monkeypatch, env_file):
 def test_chunking_and_filter_defaults(monkeypatch, env_file):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     cfg = Config.load(env_path=env_file)
-    assert cfg.chunk_target_sec == 45
-    assert cfg.chunk_max_sec == 90
+    assert cfg.chunk_target_sec == 25
+    assert cfg.chunk_max_sec == 40
     assert cfg.silence_noise_db == "-30dB"
     assert cfg.silence_min_sec == 0.5
     assert cfg.max_concurrency == 4
@@ -121,7 +121,7 @@ def test_blank_new_env_vars_fall_back_to_defaults(monkeypatch, env_file):
     for var in ("CHUNK_TARGET_SEC", "SILENCE_MIN_SEC", "MAX_CONCURRENCY", "NO_SPEECH_THRESHOLD"):
         monkeypatch.setenv(var, "")
     cfg = Config.load(env_path=env_file)
-    assert cfg.chunk_target_sec == 45
+    assert cfg.chunk_target_sec == 25
     assert cfg.silence_min_sec == 0.5
     assert cfg.max_concurrency == 4
     assert cfg.no_speech_threshold == 0.6
