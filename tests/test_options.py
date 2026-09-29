@@ -14,7 +14,8 @@ def test_defaults_are_maximum_accuracy():
     # Measured 2026-09-30: no denoiser beat untouched audio; normalization never hurt.
     assert d["denoise"] == "off"
     assert d["normalize"] is True
-    assert d["preset"] == "custom"
+    assert d["preset"] == "accuracy"  # untouched defaults are the accuracy preset
+    assert O.resolve({"beam_size": 3})["preset"] == "custom"
 
 
 def test_fast_preset_switches_to_turbo_and_greedy():

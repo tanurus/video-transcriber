@@ -60,8 +60,10 @@ details.card[open] > summary { margin-bottom: 10px; }
 .stack > * + * { margin-top: 12px; }
 .actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
 .actions.wrap { flex-wrap: wrap; }
-.sticky-actions { position: sticky; bottom: 0; background: linear-gradient(transparent, var(--surface) 30%);
-  padding: 14px 0 max(4px, env(safe-area-inset-bottom)); margin-bottom: -4px; z-index: 5; }
+.sticky-actions { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--line);
+  padding: 12px 0 max(6px, env(safe-area-inset-bottom)); margin: 16px 0 -6px; z-index: 5; }
+.sticky-actions button { flex: 1; }
+@media (min-width: 700px) { .sticky-actions button { flex: none; } }
 .flash { background: var(--info-soft); color: var(--info); border-radius: 12px; padding: 10px 14px; margin-bottom: 16px; }
 .flash p { margin: 0; }
 .notice { background: var(--warn-soft); border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
@@ -90,7 +92,8 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px s
 .check input { width: 18px; height: 18px; accent-color: var(--brand); }
 
 /* switch */
-.switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; }
+.field .switch, .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 600; margin: 0; }
+.switch .knob { display: block; }
 .switch input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .switch .knob { flex: none; width: 42px; height: 24px; border-radius: 999px; background: var(--line); position: relative; transition: .15s; }
 .switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: .15s; box-shadow: var(--shadow); }
@@ -216,3 +219,11 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); }
   font-size: .92rem; animation: pop .15s ease-out; }
 .toast.bad { background: var(--danger); color: #fff; }
 @keyframes pop { from { transform: translateY(-6px); opacity: 0; } }
+@media (max-width: 600px) {
+  .bulkbar { left: 8px; right: 8px; transform: none; max-width: none; display: grid;
+    grid-template-columns: 1fr 1fr; border-radius: 18px 18px 14px 14px; }
+  .bulkbar > span { grid-column: 1 / -1; text-align: center; }
+  .bulkbar button, .bulkbar .menu, .bulkbar .menu > button { width: 100%; }
+  .bulkbar .menu-items { left: 0; right: auto; }
+  main { padding-bottom: 220px; }
+}

@@ -414,7 +414,7 @@ def register_routes(app: Flask) -> None:
         _settings, storage, _jobs = _svc()
         preset = request.form.get("preset") or None
         opts = O.resolve(O.from_form(request.form), preset=preset)
-        storage.set_setting("default_options", {k: v for k, v in opts.items() if k in O.BY_KEY})
+        storage.set_setting("default_options", {k: v for k, v in opts.items() if k in O.BY_KEY or k == "preset"})
         flash("Default settings saved — every device uses them for new uploads.")
         return redirect(url_for("settings_page") + "#defaults")
 
@@ -423,7 +423,7 @@ def register_routes(app: Flask) -> None:
         _settings, storage, _jobs = _svc()
         body = request.get_json(silent=True) or {}
         opts = O.resolve(body.get("options") or {}, preset=body.get("preset"))
-        storage.set_setting("default_options", {k: v for k, v in opts.items() if k in O.BY_KEY})
+        storage.set_setting("default_options", {k: v for k, v in opts.items() if k in O.BY_KEY or k == "preset"})
         return jsonify({"message": "Saved as the default for new uploads on every device."})
 
     @app.post("/settings/profiles")

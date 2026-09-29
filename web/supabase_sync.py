@@ -65,9 +65,11 @@ class SupabaseConfig:
     key: str
     table: str = "transcripts"
     timeout: float = 60.0
+    # Supabase serves PostgREST under /rest/v1; a bare self-hosted PostgREST uses "".
+    rest_path: str = "/rest/v1"
 
     def endpoint(self) -> str:
-        return f"{self.url.rstrip('/')}/rest/v1/{self.table}"
+        return f"{self.url.rstrip('/')}{self.rest_path}/{self.table}"
 
     def headers(self) -> Dict[str, str]:
         return {

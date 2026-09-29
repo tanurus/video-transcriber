@@ -207,7 +207,13 @@ def resolve(
                 out[key] = _coerce(BY_KEY[key], value)
     if out["chunk_max_sec"] < out["chunk_target_sec"]:
         out["chunk_max_sec"] = out["chunk_target_sec"]
-    out["preset"] = preset if preset in PRESETS else (base or {}).get("preset", "custom")
+    if preset in PRESETS:
+        out["preset"] = preset
+    elif raw:
+        out["preset"] = "custom"
+    else:
+        # No explicit choice: inherit the base's label; plain defaults ARE "accuracy".
+        out["preset"] = (base or {}).get("preset") or ("accuracy" if not base else "custom")
     return out
 
 

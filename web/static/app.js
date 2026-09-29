@@ -115,6 +115,14 @@
     return ok ? Promise.resolve() : Promise.reject(new Error("copy blocked"));
   }
 
+  // Show stored timestamps in the viewer's own time zone. File-name times have no
+  // zone and are already local; UTC ones carry "+00:00" and convert.
+  $$("time[data-local]").forEach(function (t) {
+    var d = new Date(t.getAttribute("datetime"));
+    if (isNaN(d)) return;
+    t.textContent = d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  });
+
   // ---- health dot -----------------------------------------------------------------------
   async function health() {
     var el = $("#health");

@@ -140,8 +140,11 @@ def parse_json_object(text: str) -> Dict[str, Any]:
     raise ValueError("unterminated JSON object in reply")
 
 
-def _clip(value: Any, limit: int) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().strip('"').rstrip(".")[:limit].strip()
+def _clip(value: Any, limit: int, strip_period: bool = True) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip().strip('"')
+    if strip_period:
+        text = text.rstrip(".")
+    return text[:limit].strip()
 
 
 class AIFinisher:
@@ -197,7 +200,7 @@ class AIFinisher:
         return AIResult(
             clean_text=clean,
             title=_clip(meta.get("title"), 80) or "Untitled recording",
-            description=_clip(meta.get("description"), 600),
+            description=_clip(meta.get("description"), 600, strip_period=False),
             tags=tags,
             language=_clip(meta.get("language"), 8).lower() or None,
             people=[_clip(p, 60) for p in (meta.get("people") or []) if _clip(p, 60)][:12],

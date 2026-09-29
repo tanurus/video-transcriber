@@ -31,7 +31,7 @@
       <a class="title" href="{{ url_for('job_page', job_id=job.id) }}">{{ job.display_name }}</a>
       {% if job.description %}<p class="desc">{{ job.description }}</p>{% endif %}
       <p class="meta">
-        <span title="Recorded">{{ (job.recorded_at or job.created_at)[:16]|replace('T', ' ') }}</span>
+        <time data-local datetime="{{ job.recorded_at or job.created_at }}" title="{{ 'Recorded' if job.recorded_at else 'Uploaded' }}">{{ (job.recorded_at or job.created_at)[:16]|replace('T', ' ') }}</time>
         {% if job.duration_sec %}<span>{{ (job.duration_sec // 60)|int }} min {{ (job.duration_sec % 60)|int }} s</span>{% endif %}
         {% if job.languages %}<span>{{ job.languages|replace(',', ' · ')|upper }}</span>{% endif %}
         {% if (job.version or 1) > 1 %}<span>v{{ job.version }}</span>{% endif %}
