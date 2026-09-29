@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +34,16 @@ _FILENAME_DATES = [
 ]
 
 
+def _local_zone():
+    name = os.getenv("TZ", "").lstrip(":")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 - unknown zone name: fall back to the system zone
+            pass
+    return datetime.now().astimezone().tzinfo
+
+
 def recorded_at_from_name(name: str) -> Optional[str]:
     for rx in _FILENAME_DATES:
         m = rx.search(name)
@@ -42,8 +54,9 @@ def recorded_at_from_name(name: str) -> Optional[str]:
             dt = datetime(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
         except ValueError:
             continue
-        # Recorder file names carry local wall-clock time with no zone: keep it naive.
-        return dt.isoformat()
+        # Recorder file names carry local wall-clock time; stamp it with the
+        # recorder's zone (TZ, i.e. this server's) so Supabase stores the true instant.
+        return dt.replace(tzinfo=_local_zone()).isoformat()
     return None
 
 

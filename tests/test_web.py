@@ -159,7 +159,7 @@ def test_chunked_upload_with_retry_and_resume(client):
                        headers={"User-Agent": "Mozilla/5.0 (Linux; Android 14; SM-S918B) Chrome/129"}).get_json()
     job = client.storage.get_job(done["job"]["id"])
     assert done["duplicate"] is False and client.jobs.submitted == [job.id]
-    assert job.recorded_at == "2026-09-29T10:15:00"  # from the file name, not the phone's mtime
+    assert job.recorded_at.startswith("2026-09-29T10:15:00+")  # from the file name (with zone), not the mtime
     assert job.source == "web" and job.source_detail.startswith("Android (SM-S918B)")
     assert job.file_size == 10 and len(job.file_sha256) == 64
     assert job.settings["beam_size"] == 3
@@ -275,10 +275,19 @@ def test_api_token_flow(client):
     assert resp.status_code == 201
     job = client.storage.get_job(resp.get_json()["job"]["id"])
     assert job.source == "phone" and job.source_detail.startswith("S23 phone")
-    assert job.recorded_at == "2026-09-30T09:15:00" and job.settings["beam_size"] == 2
+    assert job.recorded_at.startswith("2026-09-30T09:15:00+") and job.settings["beam_size"] == 2
     again = client.post("/api/v1/jobs", headers=h, content_type="multipart/form-data",
                         data={"file": (io.BytesIO(b"rec"), "copy.mp4")})
     assert again.status_code == 200 and again.get_json()["duplicate"] is True
     assert client.get(f"/api/v1/jobs/{job.id}", headers=h).get_json()["status"] == "queued"
     assert client.post("/api/v1/jobs", headers=h, data={"options": "[]", "file": (io.BytesIO(b"z"), "a.mp4")},
                        content_type="multipart/form-data").status_code == 400
+
+
+def test_filename_time_carries_the_recorder_zone(monkeypatch):
+    from web.intake import recorded_at_from_name
+    monkeypatch.setenv("TZ", "Europe/Bucharest")
+    assert recorded_at_from_name("2026-09-29 12-29-53.mkv") == "2026-09-29T12:29:53+03:00"
+    monkeypatch.setenv("TZ", "UTC")
+    assert recorded_at_from_name("VID_20260105_080000.mp4") == "2026-01-05T08:00:00+00:00"
+    assert recorded_at_from_name("meeting.m4a") is None

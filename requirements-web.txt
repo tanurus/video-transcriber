@@ -2,3 +2,5 @@ flask>=3.0
 gunicorn>=21.2
 # Supabase (PostgREST) delivery.
 httpx>=0.27
+# Time-zone database for recording times (the slim image has none).
+tzdata

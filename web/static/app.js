@@ -55,7 +55,10 @@
     else if (ai === "done") out.push(["AI ✓", "ok"]);
     else if (ai === "error") out.push(["AI failed", "bad"]);
     var sy = job.sync_status;
-    if (sy === "pending") out.push(job.sync_error ? ["Supabase: retrying", "warn"] : ["Sending…", "run"]);
+    if (sy === "pending") {
+      if (job.sync_error === "Waiting for Supabase settings") out.push(["Waiting for Supabase setup", ""]);
+      else out.push(job.sync_error ? ["Supabase: retrying", "warn"] : ["Sending…", "run"]);
+    }
     else if (sy === "synced") out.push(["In Supabase", "ok"]);
     else if (sy === "error") out.push(["Supabase failed", "bad"]);
     return out;
@@ -359,6 +362,7 @@
         } else if (action === "regenerate") {
           $("#regen-count").textContent = selected().length;
           $("#regen-dialog").showModal();
+          regenInitial = collectOptions($("#regen-dialog")).options;
         } else { bulk(action); }
       });
     });
@@ -367,11 +371,18 @@
         location.href = "/download.zip?kind=" + a.getAttribute("data-zip") + "&ids=" + selected().join(",");
       });
     });
-    var dlg = $("#regen-dialog");
+    var dlg = $("#regen-dialog"), regenInitial = {};
     $("#regen-go").addEventListener("click", function (e) {
       e.preventDefault();
       var s = collectOptions(dlg);
       s.keep_base = !!$('[name="keep_base"]', dlg).checked;
+      if (s.keep_base) {
+        // Send only what was changed in the dialog; everything else stays as
+        // each transcript had it.
+        var changed = {};
+        Object.keys(s.options).forEach(function (k) { if (s.options[k] !== regenInitial[k]) changed[k] = s.options[k]; });
+        s.options = changed;
+      }
       dlg.close();
       bulk("regenerate", s);
     });
