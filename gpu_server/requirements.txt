@@ -1,0 +1,9 @@
+# Local GPU Whisper server (Linux + NVIDIA). Install into its own venv, not the app's.
+faster-whisper==1.2.1
+# PyAV 19 removed the metadata_errors kwarg faster-whisper 1.2.1 passes to av.open().
+av>=15,<17
+flask>=3.0
+gunicorn>=21.2
+# CUDA 12 runtime libraries for ctranslate2; run.sh puts them on LD_LIBRARY_PATH.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
