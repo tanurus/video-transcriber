@@ -145,4 +145,4 @@ on an RTX 4060 Ti).
 ## Notes
 - The web container never needs a public port; nothing is exposed to the internet.
 - The web form offers **Best** (`whisper-large-v3`) or **Fast** (`whisper-large-v3-turbo`,
-  roughly 3× quicker); Fast works on the local server and on Groq.
+  quicker and slightly less accurate); Fast works on the local server and on Groq.
