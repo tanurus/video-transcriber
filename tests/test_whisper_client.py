@@ -200,3 +200,77 @@ def test_no_filter_configured_uses_text_mode(tmp_path):
     out = client.transcribe_file(f)
     assert captured["response_format"] == "text"
     assert out == "fallback text"
+
+
+# --- candidate-language race --------------------------------------------------
+
+def test_language_race_picks_highest_confidence(tmp_path):
+    calls = []
+    # ru fits the audio best (highest avg_logprob); ro/en decode poorly.
+    scores = {"ro": -1.2, "ru": -0.2, "en": -1.5}
+
+    def fake_create(**kwargs):
+        lang = kwargs.get("language")
+        calls.append(lang)
+        seg = SimpleNamespace(
+            text=f" text-{lang}", no_speech_prob=0.0,
+            avg_logprob=scores[lang], compression_ratio=1.3, start=0.0, end=10.0,
+        )
+        return SimpleNamespace(text=f"full-{lang}", segments=[seg])
+
+    client = WhisperClient(
+        api_key="k", model="whisper-large-v3",
+        segment_filter=SegmentFilter(), candidate_languages=["ro", "ru", "en"],
+    )
+    client.client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))
+    )
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    out = client.transcribe_file(f)
+
+    assert set(calls) == {"ro", "ru", "en"}  # all candidates were raced
+    assert out == "text-ru"  # highest-confidence winner, filtered text
+
+
+def test_language_race_disabled_on_non_whisper_model(tmp_path):
+    # gpt-4o can't return verbose segments, so the race can't score -> single pass.
+    calls = []
+
+    def fake_create(**kwargs):
+        calls.append(kwargs.get("language"))
+        return SimpleNamespace(text="ok")
+
+    client = WhisperClient(
+        api_key="k", model="gpt-4o-transcribe", candidate_languages=["ro", "ru", "en"]
+    )
+    client.client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))
+    )
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    out = client.transcribe_file(f)
+    assert out == "ok"
+    assert len(calls) == 1  # no race
+
+
+def test_language_race_prefers_speech_over_filtered_repetition(tmp_path):
+    def fake_create(**kwargs):
+        repeated = kwargs["language"] == "ro"
+        seg = SimpleNamespace(
+            text="loop loop loop" if repeated else "valid speech",
+            no_speech_prob=0.0, avg_logprob=-0.1 if repeated else -0.2,
+            compression_ratio=3.9 if repeated else 1.2, start=0.0, end=10.0,
+        )
+        return SimpleNamespace(text=seg.text, segments=[seg])
+
+    client = WhisperClient(
+        api_key="k", model="whisper-large-v3", segment_filter=SegmentFilter(),
+        candidate_languages=["ro", "ru"],
+    )
+    client.client = SimpleNamespace(
+        audio=SimpleNamespace(transcriptions=SimpleNamespace(create=fake_create))
+    )
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    assert client.transcribe_file(f) == "valid speech"

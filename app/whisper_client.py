@@ -86,6 +86,28 @@ def _supports_verbose(model: str) -> bool:
     return "whisper" in model.lower()
 
 
+def _score_segments(segments: Iterable[Any]) -> float:
+    """Duration-weighted mean of avg_logprob — how well a decode fits the audio.
+
+    Used to pick the winning language in a candidate race: the correct language
+    fits the acoustics best and scores highest; wrong languages (e.g. Polish for
+    Russian speech) decode with markedly lower confidence.
+    """
+    total_dur = 0.0
+    acc = 0.0
+    for seg in segments:
+        start = float(_seg_get(seg, "start", 0.0))
+        end = float(_seg_get(seg, "end", 0.0))
+        dur = end - start
+        if dur <= 0:
+            dur = 1.0
+        acc += float(_seg_get(seg, "avg_logprob", -10.0)) * dur
+        total_dur += dur
+    if total_dur <= 0:
+        return float("-inf")
+    return acc / total_dur
+
+
 class WhisperClient:
     def __init__(
         self,
@@ -95,28 +117,29 @@ class WhisperClient:
         base_url: str | None = None,
         language: str | None = None,
         segment_filter: SegmentFilter | None = None,
+        candidate_languages: List[str] | None = None,
     ) -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
         self.timeout = timeout
         self.language = language
-        # Filtering needs per-segment stats, which only the verbose_json response
-        # (whisper models) provides. Disabled -> plain text, no filtering.
         self.segment_filter = segment_filter
-        self._use_verbose = segment_filter is not None and _supports_verbose(model)
+        # When set, each chunk is transcribed once per candidate and the highest-
+        # confidence result wins — this pins Whisper to a known language set (e.g.
+        # ro/ru/en) so it can never drift into Polish/Ukrainian.
+        self.candidate_languages = candidate_languages or None
+        self._verbose_ok = _supports_verbose(model)
+        # Filtering and the race both need per-segment stats -> verbose_json.
+        self._use_verbose = (
+            segment_filter is not None or bool(self.candidate_languages)
+        ) and self._verbose_ok
 
-    def transcribe_file(
-        self, audio_file: str | Path, logger: Callable[[str], None] | None = None
-    ) -> str:
+    def _create_with_retry(self, audio_file: str | Path, response_format: str, language: str | None):
         retries = 3
         backoff = 5
-        response_format = "verbose_json" if self._use_verbose else "text"
         for attempt in range(1, retries + 1):
             try:
                 with open(audio_file, "rb") as f:
-                    # Transcribe in the SPOKEN language: Whisper auto-detects when
-                    # no language is passed, and native-language transcription is
-                    # more accurate than translating to English on the fly.
                     # temperature=0 minimises Whisper's repetition/hallucination loops.
                     kwargs = dict(
                         model=self.model,
@@ -124,10 +147,9 @@ class WhisperClient:
                         response_format=response_format,
                         temperature=0,
                     )
-                    if self.language:
-                        kwargs["language"] = self.language
-                    resp = self.client.audio.transcriptions.create(**kwargs)
-                return self._parse_response(resp, logger)
+                    if language:
+                        kwargs["language"] = language
+                    return self.client.audio.transcriptions.create(**kwargs)
             except _RETRYABLE_ERRORS:
                 if attempt < retries:
                     time.sleep(backoff * attempt)
@@ -135,9 +157,48 @@ class WhisperClient:
                 raise
         raise RuntimeError("unreachable: retry loop exited without returning or raising")
 
-    def _parse_response(self, resp: Any, logger: Callable[[str], None] | None) -> str:
+    def transcribe_file(
+        self, audio_file: str | Path, logger: Callable[[str], None] | None = None
+    ) -> str:
+        if self.candidate_languages and self._verbose_ok:
+            return self._transcribe_race(audio_file, logger)
+        response_format = "verbose_json" if self._use_verbose else "text"
+        resp = self._create_with_retry(audio_file, response_format, self.language)
+        return self._finalize(resp, logger)
+
+    def _transcribe_race(
+        self, audio_file: str | Path, logger: Callable[[str], None] | None
+    ) -> str:
+        """Transcribe once per candidate language; keep the most confident decode."""
+        best: Optional[Tuple[float, str, Any, list]] = None
+        for lang in self.candidate_languages:  # type: ignore[union-attr]
+            resp = self._create_with_retry(audio_file, "verbose_json", lang)
+            segments = _seg_get(resp, "segments", None) or []
+            scored_segments = segments
+            if self.segment_filter is not None:
+                # Rejected hallucinations must not outrank usable speech.
+                scored_segments = [
+                    seg for seg in segments
+                    if filter_segments([seg], self.segment_filter)[0].strip()
+                ]
+            score = _score_segments(scored_segments)
+            if best is None or score > best[0]:
+                best = (score, lang, resp, segments)
+
+        score, lang, resp, segments = best  # type: ignore[misc]
+        if logger:
+            logger(f"  Language race: picked '{lang}' (confidence {score:.3f})")
+        return self._finalize(resp, logger, segments=segments)
+
+    def _finalize(
+        self,
+        resp: Any,
+        logger: Callable[[str], None] | None,
+        segments: Any = None,
+    ) -> str:
         if self._use_verbose and self.segment_filter is not None:
-            segments = _seg_get(resp, "segments", None)
+            if segments is None:
+                segments = _seg_get(resp, "segments", None)
             if segments:
                 text, dropped = filter_segments(segments, self.segment_filter)
                 if dropped and logger:

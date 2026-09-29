@@ -18,6 +18,7 @@ def clean_env(monkeypatch):
         "OPENAI_API_KEY",
         "TRANSCRIBE_MODEL",
         "TRANSCRIBE_LANGUAGE",
+        "CANDIDATE_LANGUAGES",
         "OPENAI_TIMEOUT",
         "CHUNK_TARGET_MB",
         "AUDIO_BITRATE",
@@ -77,6 +78,19 @@ def test_groq_key_takes_precedence(monkeypatch, env_file):
     assert cfg.base_url == GROQ_BASE_URL
     # whisper-large-v3 (not turbo) is Groq's highest-accuracy Whisper model.
     assert cfg.model == "whisper-large-v3"
+
+
+def test_candidate_languages_default_none(monkeypatch, env_file):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    cfg = Config.load(env_path=env_file)
+    assert cfg.candidate_languages is None
+
+
+def test_candidate_languages_parsed_from_csv(monkeypatch, env_file):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("CANDIDATE_LANGUAGES", "ro, ru , en")
+    cfg = Config.load(env_path=env_file)
+    assert cfg.candidate_languages == ["ro", "ru", "en"]
 
 
 def test_chunking_and_filter_defaults(monkeypatch, env_file):

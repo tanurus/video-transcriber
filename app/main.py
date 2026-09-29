@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -125,6 +126,7 @@ def transcribe_video(
             timeout=cfg.timeout,
             base_url=cfg.base_url,
             language=cfg.language,
+            candidate_languages=cfg.candidate_languages,
             segment_filter=SegmentFilter(
                 no_speech_threshold=cfg.no_speech_threshold,
                 logprob_threshold=cfg.logprob_threshold,
@@ -221,6 +223,37 @@ def run_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+# Language dropdown label -> (forced language, candidate languages for the race).
+LANG_OPTIONS: "dict[str, tuple[Optional[str], Optional[list[str]]]]" = {
+    "Auto-detect": (None, None),
+    "Auto (RO/RU/EN)": (None, ["ro", "ru", "en"]),
+    "Romanian": ("ro", None),
+    "Russian": ("ru", None),
+    "English": ("en", None),
+}
+
+
+def _default_language_label(cfg: Config) -> str:
+    """Pick the dropdown label that reflects the loaded config."""
+    for label, (lang, cands) in LANG_OPTIONS.items():
+        if (lang, cands) == (cfg.language, cfg.candidate_languages):
+            return label
+    return "Configured (.env)"
+
+
+def _language_options(cfg: Config) -> dict:
+    """Keep custom configured languages selectable without altering presets."""
+    options = dict(LANG_OPTIONS)
+    options[_default_language_label(cfg)] = (cfg.language, cfg.candidate_languages)
+    return options
+
+
+def _parse_db(value: str) -> int:
+    """Extract the integer dB from a string like '-30dB' (default -30)."""
+    m = re.search(r"-?\d+", value or "")
+    return int(m.group()) if m else -30
+
+
 class TranscriptionApp:
     """Lightweight Tkinter UI for selecting a video and viewing transcription logs."""
 
@@ -235,6 +268,19 @@ class TranscriptionApp:
         self._next_idx: int = 1
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._worker: threading.Thread | None = None
+
+        # Experiment controls. Defaults reflect .env / config defaults; loading
+        # without a key still yields the dataclass defaults for the UI.
+        try:
+            defaults = Config.load()
+        except Exception:
+            defaults = Config(openai_api_key="")
+        self.language_options = _language_options(defaults)
+        self.language_var = tk.StringVar(value=_default_language_label(defaults))
+        self.chunk_target_var = tk.IntVar(value=defaults.chunk_target_sec)
+        self.chunk_max_var = tk.IntVar(value=defaults.chunk_max_sec)
+        self.silence_db_var = tk.IntVar(value=_parse_db(defaults.silence_noise_db))
+        self.max_parallel_var = tk.IntVar(value=defaults.max_concurrency)
 
         self._build_ui()
         self.root.after(150, self._drain_logs)
@@ -258,8 +304,21 @@ class TranscriptionApp:
         controls = ttk.Frame(main)
         controls.pack(fill="x", pady=(0, 8))
         ttk.Button(controls, text="Add Files...", command=self._add_files).pack(side="left")
+        ttk.Button(controls, text="Remove selected", command=self._remove_selected).pack(side="left", padx=(8, 0))
         self.start_btn = ttk.Button(controls, text="Start Transcription", command=self._start_transcription)
         self.start_btn.pack(side="left", padx=(8, 0))
+
+        ttk.Label(controls, text="Language:").pack(side="left", padx=(12, 4))
+        self.language_combo = ttk.Combobox(
+            controls,
+            textvariable=self.language_var,
+            state="readonly",
+            width=16,
+            values=list(self.language_options.keys()),
+        )
+        self.language_combo.pack(side="left")
+        ttk.Button(controls, text="Settings...", command=self._open_settings).pack(side="left", padx=(8, 0))
+
         ttk.Label(controls, textvariable=self.status_var, foreground="#2d6a4f").pack(side="left", padx=(12, 0))
 
         queue_label = ttk.Label(main, text="Queue", font=("Segoe UI", 10, "bold"))
@@ -308,6 +367,88 @@ class TranscriptionApp:
         self.log_box = scrolledtext.ScrolledText(main, height=12, wrap="word", state="disabled")
         self.log_box.pack(fill="both", expand=True, pady=(4, 0))
 
+    def _open_settings(self) -> None:
+        """Modal dialog to tweak chunking/parallelism; applies on the next run."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Settings")
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        frm = ttk.Frame(dlg, padding=12)
+        frm.pack(fill="both", expand=True)
+
+        # Snapshot so Cancel (or closing the window) restores prior values.
+        snapshot = (
+            self.chunk_target_var.get(),
+            self.chunk_max_var.get(),
+            self.silence_db_var.get(),
+            self.max_parallel_var.get(),
+        )
+
+        rows = [
+            ("Chunk target (seconds)", self.chunk_target_var),
+            ("Chunk max (seconds)", self.chunk_max_var),
+            ("Silence sensitivity (dB, negative)", self.silence_db_var),
+            ("Max parallel segments", self.max_parallel_var),
+        ]
+        for i, (label, var) in enumerate(rows):
+            ttk.Label(frm, text=label).grid(row=i, column=0, sticky="w", pady=4, padx=(0, 8))
+            ttk.Entry(frm, textvariable=var, width=8).grid(row=i, column=1, sticky="e", pady=4)
+
+        ttk.Label(
+            frm,
+            text="Shorter chunks = more frequent language detection.\nBelow ~20s can hurt accuracy.",
+            foreground="#6c757d",
+        ).grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(6, 10))
+
+        def on_ok() -> None:
+            try:
+                t = self.chunk_target_var.get()
+                mx = self.chunk_max_var.get()
+                db = self.silence_db_var.get()
+                par = self.max_parallel_var.get()
+            except Exception:
+                messagebox.showerror("Invalid settings", "All fields must be whole numbers.", parent=dlg)
+                return
+            if t <= 0 or mx <= 0 or par < 1:
+                messagebox.showerror("Invalid settings", "Seconds and parallelism must be positive.", parent=dlg)
+                return
+            if mx < t:
+                messagebox.showerror("Invalid settings", "Chunk max must be >= chunk target.", parent=dlg)
+                return
+            if db >= 0:
+                messagebox.showerror("Invalid settings", "Silence dB should be negative (e.g. -30).", parent=dlg)
+                return
+            dlg.destroy()
+
+        def on_cancel() -> None:
+            self.chunk_target_var.set(snapshot[0])
+            self.chunk_max_var.set(snapshot[1])
+            self.silence_db_var.set(snapshot[2])
+            self.max_parallel_var.set(snapshot[3])
+            dlg.destroy()
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="e")
+        ttk.Button(btns, text="Cancel", command=on_cancel).pack(side="right", padx=(8, 0))
+        ttk.Button(btns, text="OK", command=on_ok).pack(side="right")
+
+        dlg.protocol("WM_DELETE_WINDOW", on_cancel)
+        dlg.grab_set()
+
+    def _remove_selected(self) -> None:
+        """Drop the selected queue row(s). Blocked while a run is in progress."""
+        if self._worker and self._worker.is_alive():
+            messagebox.showinfo("Busy", "Can't remove files while transcription is running.")
+            return
+        selection = self.queue_tree.selection()
+        if not selection:
+            return
+        for iid in selection:
+            self.queue_tree.delete(iid)
+            self._queue_paths.pop(iid, None)
+            self._output_paths.pop(iid, None)
+        self._refresh_actions()
+
     def _add_files(self) -> None:
         paths = filedialog.askopenfilenames(
             title="Select video files",
@@ -341,14 +482,34 @@ class TranscriptionApp:
                 messagebox.showinfo("Nothing to do", "All queued files have already been processed.")
             return
 
+        # Read the Tk variables here on the main thread; the worker thread must
+        # not touch Tk. Fall back gracefully if a field holds invalid text.
+        try:
+            lang, candidates = self.language_options[self.language_var.get()]
+            overrides = {
+                "language": lang,
+                "candidate_languages": candidates,
+                "chunk_target_sec": self.chunk_target_var.get(),
+                "chunk_max_sec": self.chunk_max_var.get(),
+                "silence_noise_db": f"{self.silence_db_var.get()}dB",
+                "max_concurrency": self.max_parallel_var.get(),
+                "label": self.language_var.get(),
+            }
+        except Exception:
+            messagebox.showerror("Invalid settings", "Please fix the values under Settings... first.")
+            return
+
         self._clear_log()
         self._set_status("Working...")
         self.start_btn.state(["disabled"])
 
-        self._worker = threading.Thread(target=self._run_queue, args=(pending,), daemon=True)
+        self._worker = threading.Thread(
+            target=self._run_queue, args=(pending, overrides), daemon=True
+        )
         self._worker.start()
 
-    def _run_queue(self, item_ids: list[str]) -> None:
+    def _run_queue(self, item_ids: list[str], overrides: dict | None = None) -> None:
+        overrides = overrides or {}
         try:
             cfg = Config.load()
         except Exception as e:
@@ -357,6 +518,23 @@ class TranscriptionApp:
             self._enable_start()
             self.root.after(0, lambda: messagebox.showerror("Config error", str(e)))
             return
+
+        # Apply the UI overrides for this run (per-run, not persisted).
+        for key in (
+            "language",
+            "candidate_languages",
+            "chunk_target_sec",
+            "chunk_max_sec",
+            "silence_noise_db",
+            "max_concurrency",
+        ):
+            if key in overrides:
+                setattr(cfg, key, overrides[key])
+        self._log(
+            f"Settings: language={overrides.get('label', '?')}, "
+            f"chunks {cfg.chunk_target_sec}-{cfg.chunk_max_sec}s, "
+            f"silence {cfg.silence_noise_db}, parallel {cfg.max_concurrency}"
+        )
 
         try:
             for iid in item_ids:

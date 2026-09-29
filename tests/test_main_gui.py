@@ -5,7 +5,21 @@ These are deliberately Tk-free so they run headless (no display in CI).
 import sys
 from pathlib import Path
 
+import pytest
+
 import app.main as m
+from app.config import Config
+
+
+@pytest.mark.parametrize("language,candidates", [
+    ("de", None), (None, ["de", "fr"]), ("de", ["ro", "ru", "en"]),
+])
+def test_language_dropdown_preserves_configured_languages(language, candidates):
+    cfg = Config(openai_api_key="test", language=language, candidate_languages=candidates)
+    options = m._language_options(cfg)
+    selected = m._default_language_label(cfg)
+    assert options[selected] == (language, candidates)
+    assert options["Auto-detect"] == (None, None)
 
 
 def _expect(p: str) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -19,6 +19,11 @@ class Config:
     audio_bitrate: str = "96k"  # ffmpeg format, e.g., "64k", "96k", "128k"
     base_url: Optional[str] = None  # None = OpenAI default
     language: Optional[str] = None  # None = Whisper auto-detects the spoken language
+
+    # When set, each chunk is transcribed once per candidate language and the
+    # highest-confidence decode wins. This pins Whisper to a known set (e.g.
+    # ro/ru/en) so it can never drift into Polish/Ukrainian on ambiguous audio.
+    candidate_languages: Optional[List[str]] = None
 
     # Silence-aware chunking. Short chunks let Whisper re-detect the language on
     # each utterance, which is what keeps multilingual meetings from being locked
@@ -68,6 +73,9 @@ class Config:
         audio_bitrate = os.getenv("AUDIO_BITRATE") or "96k"
         language = os.getenv("TRANSCRIBE_LANGUAGE") or None
 
+        raw_candidates = os.getenv("CANDIDATE_LANGUAGES") or ""
+        candidate_languages = [c.strip() for c in raw_candidates.split(",") if c.strip()] or None
+
         chunk_target_sec = int(os.getenv("CHUNK_TARGET_SEC") or "25")
         chunk_max_sec = int(os.getenv("CHUNK_MAX_SEC") or "40")
         silence_noise_db = os.getenv("SILENCE_NOISE_DB") or "-30dB"
@@ -85,6 +93,7 @@ class Config:
             audio_bitrate=audio_bitrate,
             base_url=base_url,
             language=language,
+            candidate_languages=candidate_languages,
             chunk_target_sec=chunk_target_sec,
             chunk_max_sec=chunk_max_sec,
             silence_noise_db=silence_noise_db,
