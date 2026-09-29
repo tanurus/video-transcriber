@@ -1,3 +1,4 @@
-openai>=1.40.0
+# Upper bound: builds must not silently jump a major version (it resolved to 3.x unpinned).
+openai>=1.40.0,<4
 python-dotenv>=1.0.1
 tqdm>=4.66.5
