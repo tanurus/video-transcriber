@@ -3,6 +3,11 @@
 <h1>Upload a video to transcribe</h1>
 <form id="upload-form" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
   <input id="file-input" type="file" name="video" accept="video/*,audio/*" required>
+  <label for="quality-select">Quality</label>
+  <select id="quality-select" name="quality">
+    <option value="best" selected>Best (Whisper large-v3)</option>
+    <option value="fast">Fast (large-v3-turbo, ~3× quicker)</option>
+  </select>
   <button id="submit-btn" type="submit">Start transcription</button>
 </form>
 

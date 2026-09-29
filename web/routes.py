@@ -18,6 +18,8 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
+from .jobs import QUALITIES, write_options
+
 
 def register_routes(app: Flask) -> None:
     @app.route("/healthz")
@@ -66,6 +68,9 @@ def register_routes(app: Flask) -> None:
         dest_dir.mkdir(parents=True, exist_ok=True)
         video_path = dest_dir / safe_name
         file.save(str(video_path))
+        quality = request.form.get("quality") or "best"
+        if quality in QUALITIES and quality != "best":
+            write_options(dest_dir, {"quality": quality})
 
         storage.create_job(job_id, filename, datetime.now(timezone.utc).isoformat())
         jobs.submit(job_id, video_path)

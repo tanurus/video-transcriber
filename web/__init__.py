@@ -21,7 +21,12 @@ def _requeue_pending(storage: Storage, settings: WebSettings, job_manager) -> No
         if job.status != "queued":
             continue
         job_dir = settings.uploads_dir / job.id
-        files = sorted(p for p in job_dir.iterdir() if p.is_file()) if job_dir.is_dir() else []
+        # Dotfiles (the per-job .options.json) are metadata, never the upload.
+        files = (
+            sorted(p for p in job_dir.iterdir() if p.is_file() and not p.name.startswith("."))
+            if job_dir.is_dir()
+            else []
+        )
         if files:
             job_manager.submit(job.id, files[0])
         else:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import threading
 import time
@@ -12,6 +13,34 @@ from .settings import WebSettings
 from .storage import Storage
 
 MAX_TRACKED_JOBS = 50
+
+# Per-job choices made on the upload form live beside the upload, so a job that
+# is requeued after a restart still runs with them.
+OPTIONS_FILE = ".options.json"
+QUALITIES = ("best", "fast")
+# Both the local GPU server and Groq serve the turbo model under this id.
+FAST_MODEL = "whisper-large-v3-turbo"
+
+
+def write_options(job_dir: Path, options: dict) -> None:
+    (Path(job_dir) / OPTIONS_FILE).write_text(json.dumps(options), encoding="utf-8")
+
+
+def read_options(video_path: Path) -> dict:
+    try:
+        return json.loads((Path(video_path).parent / OPTIONS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def apply_options(cfg, options: dict) -> Optional[str]:
+    """Apply upload-form options to a loaded Config. Returns a log line, or None."""
+    if options.get("quality") != "fast":
+        return None
+    if getattr(cfg, "provider", None) in ("local", "groq"):
+        cfg.model = FAST_MODEL
+        return f"Quality: fast ({FAST_MODEL})"
+    return f"Quality: fast is not available on {getattr(cfg, 'provider', '?')}; using {cfg.model}"
 
 
 def _utcnow_iso() -> str:
@@ -58,6 +87,9 @@ class JobManager:
             self.storage.update_status(job_id, "running")
             self._append_log(job_id, f"--- {Path(video_path).name} ---")
             cfg = self.cfg_loader()
+            note = apply_options(cfg, read_options(video_path))
+            if note:
+                self._append_log(job_id, note)
             self.transcribe_fn(
                 video_path,
                 cfg,
