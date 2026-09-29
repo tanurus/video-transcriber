@@ -30,6 +30,9 @@ def clean_env(monkeypatch):
         "NO_SPEECH_THRESHOLD",
         "LOGPROB_THRESHOLD",
         "COMPRESSION_RATIO_THRESHOLD",
+        "TRANSCRIBE_PROVIDER",
+        "LOCAL_WHISPER_URL",
+        "LOCAL_WHISPER_API_KEY",
     ]:
         monkeypatch.delenv(var, raising=False)
 
