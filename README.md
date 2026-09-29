@@ -91,13 +91,31 @@ Note: the transcript is written in the language spoken in the recording. Transcr
 
 ## Web app on a VPS (browser access over Tailscale)
 
-You can run this as a browser app on a Linux VPS and reach it from any device on
-your Tailscale tailnet — upload a video, watch live progress, and download the
-transcript, with no local app running. If the VPS has an NVIDIA GPU, the bundled
-`gpu_server/` transcribes with Whisper large-v3 locally instead of a paid API.
+A browser app you can use from any device on your tailnet — phone included.
+If the VPS has an NVIDIA GPU, the bundled `gpu_server/` transcribes with Whisper
+large-v3 locally instead of a paid API. See [docs/deploy.md](docs/deploy.md).
 
-See [docs/deploy.md](docs/deploy.md) for full instructions, including how to
-expose it on the tailnet without accidentally making it public.
+- **Upload** any number of files at once (drag-and-drop or the phone's file picker).
+  Big files go up in resumable 8 MB pieces that retry on a flaky connection.
+- **Settings that matter**, with presets (Maximum accuracy / Balanced / Fast) and an
+  advanced panel: audio preparation (lossless audio, EBU R128 loudness, optional
+  denoise), segmentation (smart chunks or Whisper-native VAD), Whisper decoding
+  (beam, best-of, patience, temperature fallback, repetition controls, hotwords,
+  prompt) and hallucination filters. **Profiles** store prompt, hotwords and
+  languages for recurring meetings.
+- **Library**: search, filter, select all, then send to Supabase, run AI finishing,
+  regenerate with other settings, download a zip, or delete. Every regeneration is
+  a new version; the lossless audio is kept so it works after the video is purged.
+- **AI finishing** (any OpenAI-compatible endpoint): cleans fillers, false starts
+  and Whisper hallucinations without translating, then writes a title, description
+  and tags and renames the transcript. A guard keeps the original wording of any
+  chunk the model rewrote instead of cleaning. The raw transcript is never changed.
+- **Supabase**: every transcript (raw + clean text, timestamped segments, languages,
+  device, recording time, settings, SHA-256, versions) is upserted into one table,
+  with retries and backoff until it lands. Settings show the setup SQL.
+- **API for other sources** (`POST /api/v1/jobs` with a token): phone shortcuts,
+  n8n, scripts. The same recording sent from two devices is recognised by its
+  SHA-256 and not transcribed twice.
 
 ### Using a VPS GPU from the desktop GUI
 

@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% from "_options.html" import options_form with context %}
+{% block title %}Settings — Transcriber{% endblock %}
+{% block page %}settings{% endblock %}
+{% block content %}
+<nav class="subnav">
+  <a href="#connections">Connections</a><a href="#defaults">Defaults</a><a href="#profiles">Profiles</a><a href="#tokens">Other devices &amp; API</a><a href="#system">System</a>
+</nav>
+
+<section id="connections" class="card">
+  <h2>Connections <span class="muted small">— set once, used from every device</span></h2>
+  <form method="post" action="{{ url_for('save_connections') }}" class="stack" autocomplete="off">
+    <fieldset>
+      <legend>OpenAI (AI clean-up, titles, descriptions)</legend>
+      <div class="grid">
+        <div class="field"><label>API key</label>
+          <input type="password" name="openai_api_key" placeholder="{{ conn.openai_api_key_hint or 'sk-…' }}" autocomplete="new-password">
+          <small>{% if conn.openai_api_key_hint %}Saved ({{ conn.openai_api_key_hint }}). Leave empty to keep it.{% else %}Not set.{% endif %}</small></div>
+        <div class="field"><label>Model</label><input name="openai_model" value="{{ conn.openai_model }}" list="model-list">
+          <datalist id="model-list"></datalist><small>Test the connection to list the models your key can use.</small></div>
+        <div class="field"><label>Titles &amp; descriptions in</label><input name="ai_language" value="{{ conn.ai_language }}"><small>e.g. English — or "same" for the recording's own language.</small></div>
+        <div class="field"><label>Base URL</label><input name="openai_base_url" value="{{ conn.openai_base_url }}"><small>Any OpenAI-compatible endpoint.</small></div>
+      </div>
+      <div class="actions"><button type="button" data-test="openai">Test OpenAI</button><span class="test-result" data-result="openai"></span>
+        {% if conn.openai_api_key_hint %}<label class="check small"><input type="checkbox" name="clear_openai_api_key" value="1"> Remove key</label>{% endif %}</div>
+    </fieldset>
+    <fieldset>
+      <legend>Supabase (where every transcript lands)</legend>
+      <div class="grid">
+        <div class="field"><label>Project URL</label><input name="supabase_url" value="{{ conn.supabase_url }}" placeholder="https://xxxx.supabase.co"></div>
+        <div class="field"><label>Service key</label>
+          <input type="password" name="supabase_key" placeholder="{{ conn.supabase_key_hint or 'service_role / sb_secret_…' }}" autocomplete="new-password">
+          <small>{% if conn.supabase_key_hint %}Saved ({{ conn.supabase_key_hint }}). Leave empty to keep it.{% else %}Project Settings → API → service_role (or a secret key). Stays on this server.{% endif %}</small></div>
+        <div class="field"><label>Table</label><input name="supabase_table" value="{{ conn.supabase_table }}"></div>
+      </div>
+      <div class="actions"><button type="button" data-test="supabase">Test Supabase</button><span class="test-result" data-result="supabase"></span>
+        {% if conn.supabase_key_hint %}<label class="check small"><input type="checkbox" name="clear_supabase_key" value="1"> Remove key</label>{% endif %}</div>
+      <details>
+        <summary>Setup SQL — run once in the Supabase SQL editor</summary>
+        <div class="code-wrap"><button type="button" class="copy-btn" data-copy="#setup-sql">Copy</button><pre id="setup-sql" class="code">{{ setup_sql }}</pre></div>
+      </details>
+    </fieldset>
+    <div class="actions"><button class="primary" type="submit">Save connections</button></div>
+  </form>
+</section>
+
+<section id="defaults" class="card">
+  <h2>Default settings <span class="muted small">— what every new upload starts with</span></h2>
+  <form method="post" action="{{ url_for('save_defaults') }}">
+    {{ options_form(catalog, groups, presets, values, profiles, open_advanced=True) }}
+    <div class="actions"><button class="primary" type="submit">Save defaults</button></div>
+  </form>
+</section>
+
+<section id="profiles" class="card">
+  <h2>Transcription profiles <span class="muted small">— vocabulary for recurring meetings</span></h2>
+  <p class="muted">A profile adds a prompt (spelling hints), hotwords (boosted terms) and the languages to expect.
+    Pick it on the upload page. Keep prompts short: Whisper reads about 224 tokens and long prompts can cause loops.</p>
+  {% for p in profiles %}
+    <details class="profile">
+      <summary><b>{{ p.name }}</b> <span class="muted small">{{ p.languages or 'auto languages' }}</span></summary>
+      <form method="post" action="{{ url_for('save_profile') }}" class="stack">
+        <input type="hidden" name="id" value="{{ p.id }}">
+        <div class="grid">
+          <div class="field"><label>Name</label><input name="name" value="{{ p.name }}" required></div>
+          <div class="field"><label>Languages</label><input name="languages" value="{{ p.languages }}" placeholder="ru,ro,en"></div>
+        </div>
+        <div class="field"><label>Prompt</label><textarea name="prompt" rows="4">{{ p.prompt }}</textarea></div>
+        <div class="field"><label>Hotwords</label><input name="hotwords" value="{{ p.hotwords }}"></div>
+        <div class="field"><label>Notes</label><input name="notes" value="{{ p.notes }}"></div>
+        <div class="actions"><button class="primary" type="submit">Save</button>
+          <button class="danger ghost" type="submit" name="delete" value="{{ p.id }}" formnovalidate data-confirm="Delete profile {{ p.name }}?">Delete</button></div>
+      </form>
+    </details>
+  {% endfor %}
+  <details class="profile" {% if not profiles %}open{% endif %}>
+    <summary><b>+ New profile</b></summary>
+    <form method="post" action="{{ url_for('save_profile') }}" class="stack">
+      <div class="grid">
+        <div class="field"><label>Name</label><input name="name" required placeholder="Economic Potential daily"></div>
+        <div class="field"><label>Languages</label><input name="languages" placeholder="ru,ro,en"></div>
+      </div>
+      <div class="field"><label>Prompt</label><textarea name="prompt" rows="4" placeholder="Participants, brands, jargon — written the way they should be spelled."></textarea></div>
+      <div class="field"><label>Hotwords</label><input name="hotwords" placeholder="AranGrant, Skyscanner, Kayak"></div>
+      <div class="field"><label>Notes</label><input name="notes"></div>
+      <div class="actions"><button class="primary" type="submit">Add profile</button></div>
+    </form>
+  </details>
+</section>
+
+<section id="tokens" class="card">
+  <h2>Other devices &amp; API</h2>
+  <p>Any device on your tailnet can simply open <b class="mono">{{ request.host_url }}</b> in a browser — phone included.
+     For automatic sending (phone shortcuts, n8n, scripts, the desktop app) create a token per source; its name is recorded as the source of every recording it sends.</p>
+  {% if new_token %}
+    <div class="notice">
+      <p><b>Token for “{{ new_token.name }}”</b> — copy it now, it is shown only once:</p>
+      <div class="code-wrap"><button type="button" class="copy-btn" data-copy="#new-token">Copy</button><pre id="new-token" class="code">{{ new_token.token }}</pre></div>
+    </div>
+  {% endif %}
+  <form method="post" action="{{ url_for('tokens') }}" class="inline">
+    <input name="name" placeholder="e.g. S23 phone, work laptop, n8n" required>
+    <button class="primary" type="submit">Create token</button>
+  </form>
+  {% if tokens %}
+    <table class="table">
+      <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody>{% for t in tokens %}
+        <tr><td>{{ t.name }}</td><td class="mono">{{ t.prefix }}…</td><td>{{ t.created_at[:10] }}</td><td>{{ (t.last_used_at or '—')[:16]|replace('T', ' ') }}</td>
+          <td><form method="post" action="{{ url_for('tokens') }}"><button class="danger ghost small" name="delete" value="{{ t.id }}" data-confirm="Revoke {{ t.name }}?">Revoke</button></form></td></tr>
+      {% endfor %}</tbody>
+    </table>
+  {% endif %}
+  <details>
+    <summary>How to send recordings automatically</summary>
+    <div class="code-wrap"><button type="button" class="copy-btn" data-copy="#curl-ex">Copy</button><pre id="curl-ex" class="code">curl -H "Authorization: Bearer vt_…" \
+  -F file=@"Meeting 2026-09-30.m4a" \
+  -F preset=accuracy \
+  -F source=phone \
+  {{ request.host_url }}api/v1/jobs
+
+# optional fields: profile_id, language, prompt, hotwords, title,
+#   recorded_at (ISO time), options (JSON of any setting), on_duplicate=new
+# check progress:  GET {{ request.host_url }}api/v1/jobs/&lt;id&gt;?text=1</pre></div>
+    <p class="muted small">Android: HTTP Shortcuts or Tasker "HTTP Request" with a multipart file field named <code>file</code>.
+      iPhone: Shortcuts → "Get Contents of URL" (POST, Form, field <code>file</code>) in a Share-sheet shortcut.
+      The same file sent twice (from two devices) is recognised by its SHA-256 and not transcribed twice.</p>
+  </details>
+</section>
+
+<section id="system" class="card">
+  <h2>System</h2>
+  <dl class="kv" id="system-kv">
+    <dt>GPU server</dt><dd id="sys-gpu">checking…</dd>
+    <dt>Transcripts</dt><dd>{{ counts.total }} total · {{ counts.active }} in progress · {{ counts.failed }} failed</dd>
+    <dt>AI queue</dt><dd>{{ counts.ai_active }}</dd>
+    <dt>Supabase</dt><dd>{{ counts.sync_pending }} waiting to send · {{ counts.sync_failed }} failed</dd>
+  </dl>
+</section>
+{% endblock %}
