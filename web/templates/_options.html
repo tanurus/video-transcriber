@@ -1,0 +1,63 @@
+{# Settings form rendered from app/options.py. Field names are "opt_<key>". #}
+{% macro field(o, values, profiles) -%}
+  {% set v = values.get(o.key, o.default) %}
+  <div class="field field-{{ o.type }}" data-key="{{ o.key }}"
+       {% if o.show_if %}data-show-if="{{ o.show_if[0] }}" data-show-values="{{ o.show_if[1]|join(',') }}"{% endif %}>
+    {% if o.type == 'bool' %}
+      <label class="switch">
+        <input type="hidden" name="opt_{{ o.key }}__present" value="1">
+        <input type="checkbox" name="opt_{{ o.key }}" {% if v %}checked{% endif %}>
+        <span class="knob"></span>
+        <span class="label">{{ o.label }}{% if o.local_only %} <em class="chip">GPU</em>{% endif %}</span>
+      </label>
+    {% else %}
+      <label for="opt_{{ o.key }}">{{ o.label }}{% if o.local_only %} <em class="chip">GPU</em>{% endif %}</label>
+      {% if o.key == 'profile_id' %}
+        <select id="opt_{{ o.key }}" name="opt_{{ o.key }}">
+          <option value="">No profile</option>
+          {% for p in profiles %}<option value="{{ p.id }}" {% if v|string == p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select>
+      {% elif o.type == 'choice' %}
+        <select id="opt_{{ o.key }}" name="opt_{{ o.key }}">
+          {% for val, lab in o.choices %}<option value="{{ val }}" {% if v == val %}selected{% endif %}>{{ lab }}</option>{% endfor %}
+        </select>
+      {% elif o.type == 'textarea' %}
+        <textarea id="opt_{{ o.key }}" name="opt_{{ o.key }}" rows="3">{{ v }}</textarea>
+      {% elif o.type in ('int', 'float') %}
+        <input id="opt_{{ o.key }}" name="opt_{{ o.key }}" type="number" inputmode="decimal" value="{{ v }}"
+               {% if o.min is not none %}min="{{ o.min }}"{% endif %} {% if o.max is not none %}max="{{ o.max }}"{% endif %}
+               step="{{ o.step or (1 if o.type == 'int' else 0.1) }}">
+      {% else %}
+        <input id="opt_{{ o.key }}" name="opt_{{ o.key }}" type="text" value="{{ v }}" autocomplete="off">
+      {% endif %}
+    {% endif %}
+    {% if o.help %}<small>{{ o.help }}</small>{% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro options_form(catalog, groups, presets, values, profiles, show_after=True, open_advanced=False) -%}
+  <div class="options" data-options data-meta="{{ options_meta|default('{}') }}">
+    <div class="preset-row" role="radiogroup" aria-label="Preset">
+      {% set current = values.get('preset', 'custom') %}
+      {% for key, label in presets %}
+        <label class="preset"><input type="radio" name="preset" value="{{ key }}" {% if current == key %}checked{% endif %}><span>{{ label }}</span></label>
+      {% endfor %}
+      <label class="preset"><input type="radio" name="preset" value="" {% if current not in ['accuracy','balanced','fast'] %}checked{% endif %}><span>Custom</span></label>
+    </div>
+    <div class="grid basics">
+      {% for o in catalog if not o.advanced and (show_after or o.group != 'after') %}{{ field(o, values, profiles) }}{% endfor %}
+    </div>
+    <details class="advanced" {% if open_advanced %}open{% endif %}>
+      <summary>Advanced settings <span class="muted">— audio cleanup, chunking, Whisper decoding, filters</span></summary>
+      {% for gkey, glabel in groups %}
+        {% set items = catalog|selectattr('group', 'equalto', gkey)|selectattr('advanced')|list %}
+        {% if items %}
+          <fieldset>
+            <legend>{{ glabel }}</legend>
+            <div class="grid">{% for o in items %}{{ field(o, values, profiles) }}{% endfor %}</div>
+          </fieldset>
+        {% endif %}
+      {% endfor %}
+    </details>
+  </div>
+{%- endmacro %}

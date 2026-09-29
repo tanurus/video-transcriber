@@ -26,5 +26,6 @@ BINDS=()
 for b in ${WHISPER_BIND:-127.0.0.1:18921}; do BINDS+=(--bind "$b"); done
 
 # One worker: the model lives in-process and one GPU runs one decode at a time.
-# Threads let /health answer while a decode holds the lock.
-exec "$VENV/bin/gunicorn" --workers 1 --threads 4 --timeout 1800 "${BINDS[@]}" gpu_server.wsgi:app
+# Threads let /health answer while a decode holds the lock. The long timeout
+# covers a whole-recording decode in Whisper-native mode.
+exec "$VENV/bin/gunicorn" --workers 1 --threads 4 --timeout 7200 "${BINDS[@]}" gpu_server.wsgi:app

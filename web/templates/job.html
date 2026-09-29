@@ -1,14 +1,103 @@
 {% extends "base.html" %}
-{% block title %}{{ job.original_name }} — Video Transcriber{% endblock %}
+{% from "_options.html" import options_form with context %}
+{% block title %}{{ job.display_name }} — Transcriber{% endblock %}
+{% block page %}job{% endblock %}
 {% block content %}
-<h1>{{ job.original_name }}</h1>
-<p>Status: <span id="status">{{ job.status }}</span>
-  <span id="spinner" class="spinner"{% if job.status in ['done', 'error', 'interrupted'] %} hidden{% endif %}></span></p>
-<p id="error" class="error" {% if not job.error %}hidden{% endif %}>{{ job.error or "" }}</p>
-<pre id="log"></pre>
-<p id="download" {% if job.status != 'done' %}hidden{% endif %}>
-  <a href="{{ url_for('download', job_id=job.id) }}">Download transcript (.txt)</a>
-</p>
-<script src="{{ url_for('static', filename='job.js') }}"
-        data-api="{{ url_for('job_api', job_id=job.id) }}"></script>
+<article class="job" data-id="{{ job.id }}" data-status="{{ job.status }}" data-api="{{ url_for('job_api', job_id=job.id) }}">
+  <header class="job-head card">
+    <div class="title-row">
+      <h1 id="title" class="editable" contenteditable="true" spellcheck="false" data-field="title" title="Click to rename">{{ job.display_name }}</h1>
+      <span class="pills" data-pills></span>
+    </div>
+    <p id="description" class="editable desc" contenteditable="true" data-field="description"
+       data-placeholder="No description yet — run AI finishing or type one.">{{ job.description or '' }}</p>
+    <p class="meta">
+      <span>{{ job.original_name }}</span>
+      <span title="Recorded">{{ (job.recorded_at or job.created_at)[:16]|replace('T', ' ') }}</span>
+      {% if job.duration_sec %}<span>{{ (job.duration_sec // 60)|int }} min {{ (job.duration_sec % 60)|int }} s</span>{% endif %}
+      {% if job.languages %}<span>{{ job.languages|replace(',', ' · ')|upper }}</span>{% endif %}
+      <span>v{{ job.version or 1 }}</span>
+      {% for t in job.tag_list %}<span class="tag">#{{ t }}</span>{% endfor %}
+    </p>
+    <div class="actions wrap">
+      <button id="btn-copy" class="primary" {% if job.status != 'done' %}disabled{% endif %}>Copy text</button>
+      <div class="menu">
+        <button type="button" data-menu {% if job.status != 'done' %}disabled{% endif %}>Download ▾</button>
+        <div class="menu-items" hidden>
+          <a href="{{ url_for('download', job_id=job.id, kind='best') }}">Best text (.txt)</a>
+          <a href="{{ url_for('download', job_id=job.id, kind='clean') }}">Clean text</a>
+          <a href="{{ url_for('download', job_id=job.id, kind='raw') }}">Raw text</a>
+          <a href="{{ url_for('download', job_id=job.id, kind='timestamps') }}">With timestamps</a>
+          <a href="{{ url_for('download', job_id=job.id, kind='srt') }}">Subtitles (.srt)</a>
+          <a href="{{ url_for('download', job_id=job.id, kind='json') }}">Full record (.json)</a>
+        </div>
+      </div>
+      <button data-action="regenerate" {% if not has_source or job.status in ['queued','running'] %}disabled title="Needs the kept audio"{% endif %}>Regenerate…</button>
+      <button data-action="ai" {% if job.status != 'done' %}disabled{% endif %}>AI clean + title</button>
+      <button data-action="sync" {% if job.status != 'done' %}disabled{% endif %}>Send to Supabase</button>
+      <button data-action="delete" class="danger ghost">Delete</button>
+    </div>
+  </header>
+
+  <section class="card" id="progress" {% if job.status == 'done' %}hidden{% endif %}>
+    <div class="row-between"><h2>Progress</h2><span id="spinner" class="spinner" {% if job.status not in ['queued', 'running'] %}hidden{% endif %}></span></div>
+    <p id="error" class="error" {% if not job.error %}hidden{% endif %}>{{ job.error or '' }}</p>
+  </section>
+
+  <section class="card" id="text-card" {% if job.status != 'done' %}hidden{% endif %}>
+    <div class="tabs" role="tablist">
+      {% if clean %}<button role="tab" data-tab="clean" class="active">Clean</button>{% endif %}
+      <button role="tab" data-tab="raw" {% if not clean %}class="active"{% endif %}>Raw</button>
+      <button role="tab" data-tab="timestamps">Timestamps</button>
+    </div>
+    {% if clean %}<pre class="transcript" data-pane="clean">{{ clean }}</pre>{% endif %}
+    <pre class="transcript" data-pane="raw" {% if clean %}hidden{% endif %}>{{ raw }}</pre>
+    <pre class="transcript" data-pane="timestamps" hidden>{{ timestamped }}</pre>
+    {% if ai_meta.notes %}<p class="muted small">AI guard: {{ ai_meta.notes|join('; ') }}</p>{% endif %}
+  </section>
+
+  <details class="card" {% if job.status in ['queued', 'running', 'error'] %}open{% endif %}>
+    <summary>Log</summary>
+    <pre id="log" class="log"></pre>
+  </details>
+
+  <details class="card">
+    <summary>Details &amp; versions</summary>
+    <dl class="kv">
+      <dt>Settings</dt><dd>{{ job.settings.get('_summary') or '—' }}</dd>
+      <dt>Model</dt><dd>{{ job.model or '—' }} ({{ job.provider or '—' }})</dd>
+      <dt>Source</dt><dd>{{ job.source or '—' }}{% if job.source_detail %} · {{ job.source_detail }}{% endif %}</dd>
+      <dt>Uploaded</dt><dd>{{ job.created_at[:19]|replace('T', ' ') }} UTC</dd>
+      <dt>File</dt><dd>{{ job.original_name }}{% if job.file_size %} · {{ (job.file_size / 1048576)|round(1) }} MB{% endif %}</dd>
+      <dt>SHA-256</dt><dd class="mono">{{ job.file_sha256 or '—' }}</dd>
+      {% if ai_meta.people %}<dt>People</dt><dd>{{ ai_meta.people|join(', ') }}</dd>{% endif %}
+      {% if ai_meta.topics %}<dt>Topics</dt><dd>{{ ai_meta.topics|join(', ') }}</dd>{% endif %}
+      <dt>Supabase</dt><dd>{{ job.sync_status or 'none' }}{% if job.synced_at %} · {{ job.synced_at[:19]|replace('T', ' ') }}{% endif %}{% if job.sync_error %} · {{ job.sync_error }}{% endif %}</dd>
+    </dl>
+    {% if versions|length > 1 %}
+      <h3>Versions</h3>
+      <ol class="versions">
+        {% for v in versions %}
+          <li {% if v.id == job.id %}class="current"{% endif %}>
+            <a href="{{ url_for('job_page', job_id=v.id) }}">v{{ v.version or 1 }}</a>
+            — {{ v.settings.get('_summary') or 'default settings' }} · {{ v.status }}
+          </li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+  </details>
+</article>
+
+<dialog id="regen-dialog" class="sheet">
+  <form method="dialog" id="regen-form">
+    <h2>Regenerate with different settings</h2>
+    <p class="muted">Creates version {{ (versions|map(attribute='version')|map('default', 1)|max) + 1 }}; this one stays. Prefilled with the settings this version used.</p>
+    {{ options_form(catalog, groups, presets, values, profiles, open_advanced=True) }}
+    <input type="hidden" name="keep_base" value="on">
+    <div class="actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button id="regen-go" class="primary" value="go">Regenerate</button>
+    </div>
+  </form>
+</dialog>
 {% endblock %}

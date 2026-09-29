@@ -239,3 +239,35 @@ def test_health_503_when_gpu_missing(manager):
 def test_models_lists_openai_style_ids(client):
     ids = [m["id"] for m in client.get("/v1/models").get_json()["data"]]
     assert ids == ["whisper-large-v3", "whisper-large-v3-turbo"]
+
+
+# --- native decoding options ----------------------------------------------------
+
+def test_decode_options_are_validated_clamped_and_passed(client, manager):
+    _post(client, beam_size="99", best_of="3", patience="1.5", condition_on_previous_text="true",
+          repetition_penalty="1.1", no_repeat_ngram_size="3", hotwords="AranGrant, Kayak",
+          temperature_fallback="false", junk_field="rm -rf")
+    _, kw = manager._model.calls[-1]
+    assert kw["beam_size"] == 10 and kw["best_of"] == 3 and kw["patience"] == 1.5
+    assert kw["condition_on_previous_text"] is True and kw["no_repeat_ngram_size"] == 3
+    assert kw["hotwords"] == "AranGrant, Kayak"
+    assert kw["temperature"] == [0.0]  # fallback switched off
+    assert "junk_field" not in kw and kw["vad_filter"] is False
+
+
+def test_native_mode_passes_vad_parameters(client, manager):
+    _post(client, vad_filter="true", vad_threshold="0.35", vad_min_silence_ms="800")
+    _, kw = manager._model.calls[-1]
+    assert kw["vad_filter"] is True
+    assert kw["vad_parameters"] == {"threshold": 0.35, "min_silence_duration_ms": 800,
+                                    "speech_pad_ms": 300, "min_speech_duration_ms": 250}
+
+
+def test_hallucination_silence_turns_on_word_timestamps(client, manager):
+    _post(client, hallucination_silence_threshold="2")
+    _, kw = manager._model.calls[-1]
+    assert kw["hallucination_silence_threshold"] == 2.0 and kw["word_timestamps"] is True
+
+
+def test_bad_number_is_400(client):
+    assert _post(client, beam_size="five").status_code == 400

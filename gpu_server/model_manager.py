@@ -3,7 +3,7 @@ from __future__ import annotations
 import gc
 import threading
 import time
-from typing import Any, Callable, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 # Whisper's own fallback schedule: decode at 0, and only if that decode fails the
 # compression-ratio / log-prob checks retry at progressively higher temperatures.
@@ -12,6 +12,50 @@ FALLBACK_TEMPERATURES = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
 
 class UnknownModelError(ValueError):
     pass
+
+
+# name -> (type, min, max). Anything else in the form is ignored; values are clamped.
+DECODE_FIELDS: Dict[str, tuple] = {
+    "beam_size": (int, 1, 10),
+    "best_of": (int, 1, 10),
+    "patience": (float, 0.5, 3.0),
+    "repetition_penalty": (float, 1.0, 2.0),
+    "no_repeat_ngram_size": (int, 0, 10),
+    "no_speech_threshold": (float, 0.0, 1.0),
+    "log_prob_threshold": (float, -5.0, 0.0),
+    "compression_ratio_threshold": (float, 1.0, 5.0),
+    "hallucination_silence_threshold": (float, 0.0, 10.0),
+    "vad_threshold": (float, 0.1, 0.9),
+    "vad_min_silence_ms": (int, 100, 5000),
+    "vad_speech_pad_ms": (int, 0, 2000),
+    "vad_min_speech_ms": (int, 0, 2000),
+    "condition_on_previous_text": (bool, None, None),
+    "temperature_fallback": (bool, None, None),
+    "vad_filter": (bool, None, None),
+}
+
+
+def parse_decode_options(form: Any) -> Dict[str, Any]:
+    """Validated faster-whisper options from request form fields (strings)."""
+    out: Dict[str, Any] = {}
+    for key, (typ, lo, hi) in DECODE_FIELDS.items():
+        raw = form.get(key)
+        if raw is None or raw == "":
+            continue
+        if typ is bool:
+            out[key] = str(raw).strip().lower() in ("1", "true", "on", "yes")
+            continue
+        try:
+            value = typ(float(raw))
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number")
+        out[key] = max(lo, min(hi, value))
+    hot = (form.get("hotwords") or "").strip()
+    if hot:
+        out["hotwords"] = hot[:1000]
+    if out.get("hallucination_silence_threshold") == 0:
+        out.pop("hallucination_silence_threshold")
+    return out
 
 
 def normalize_model(requested: str, default: str, allowed: Iterable[str]) -> str:
@@ -103,23 +147,44 @@ class ModelManager:
         language: Optional[str] = None,
         temperature: float = 0.0,
         prompt: Optional[str] = None,
+        decode: Optional[Dict[str, Any]] = None,
     ) -> dict:
+        """``decode`` carries validated faster-whisper options (see parse_decode_options)."""
         name = self.resolve(model)
-        temperatures = FALLBACK_TEMPERATURES if temperature == 0 else [temperature]
+        decode = dict(decode or {})
+        fallback = decode.pop("temperature_fallback", True)
+        if temperature == 0:
+            temperatures = FALLBACK_TEMPERATURES if fallback else [0.0]
+        else:
+            temperatures = [temperature]
+        kwargs: Dict[str, Any] = {
+            "beam_size": self.beam_size,
+            "condition_on_previous_text": self.condition_on_previous_text,
+            "vad_filter": False,
+        }
+        vad = {k: decode.pop(k) for k in list(decode) if k.startswith("vad_") and k != "vad_filter"}
+        kwargs.update(decode)
+        if kwargs.get("vad_filter"):
+            kwargs["vad_parameters"] = {
+                "threshold": vad.get("vad_threshold", 0.5),
+                "min_silence_duration_ms": vad.get("vad_min_silence_ms", 1000),
+                "speech_pad_ms": vad.get("vad_speech_pad_ms", 300),
+                "min_speech_duration_ms": vad.get("vad_min_speech_ms", 250),
+            }
+        if kwargs.get("hallucination_silence_threshold"):
+            kwargs["word_timestamps"] = True  # faster-whisper needs them for this check
         with self._lock:
             self.busy = True
             try:
                 whisper = self._ensure_loaded(name)
+                # Defaults: chunks are already cut at pauses by the app, and
+                # conditioning on the previous window mostly feeds repetition loops.
                 segments, info = whisper.transcribe(
                     audio_path,
                     language=language or None,
                     temperature=temperatures,
                     initial_prompt=prompt or None,
-                    beam_size=self.beam_size,
-                    # Chunks are already cut at pauses by the app; conditioning on
-                    # the previous window mostly feeds repetition loops.
-                    condition_on_previous_text=self.condition_on_previous_text,
-                    vad_filter=False,
+                    **kwargs,
                 )
                 # The segment generator does the actual decoding — drain it inside the lock.
                 segs = [

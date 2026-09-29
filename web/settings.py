@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_ALLOWED_EXT = "mp4,mkv,mov,avi,webm,m4a,mp3,wav"
+DEFAULT_ALLOWED_EXT = "mp4,mkv,mov,avi,webm,m4a,mp3,wav,ogg,opus,flac,aac,amr,3gp,wma,mpeg,mpg,m4v,ts"
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,8 @@ class WebSettings:
     retain_video_days: int
     max_content_mb: int
     allowed_ext: frozenset[str]
+    # Largest single recording accepted through chunked / API upload.
+    max_file_mb: int = 8192
 
     @staticmethod
     def load() -> "WebSettings":
@@ -26,6 +28,7 @@ class WebSettings:
             retain_video_days=int(os.getenv("RETAIN_VIDEO_DAYS") or "30"),
             max_content_mb=int(os.getenv("MAX_CONTENT_MB") or "2048"),
             allowed_ext=allowed,
+            max_file_mb=int(os.getenv("MAX_FILE_MB") or "8192"),
         )
 
     @property
