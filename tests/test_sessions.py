@@ -101,6 +101,9 @@ def test_retry_ladder_fixes_the_lithuanian_drift(api):
     assert first["passed"] is False and first["checks"]["problems"] == ["wrong_language:lt"]
     assert first["checks"]["signals"]["language_probability"] == 0.41
     assert first["segments"][0]["start"] == round(c1["start"] + 0.5, 2)  # on the recording's timeline
+    assert first["checks"]["signals"]["language_forced"] is False
+    forced = tx(api, sid, 1, language="ro")
+    assert forced["checks"]["signals"]["language_forced"] is True
     second = tx(api, sid, 1, candidate_languages=["ro", "ru", "en"], label="race")
     assert second["passed"] and second["language"] == "ro"
     assert second["checks"]["signals"]["race_scores"]["ro"] == -0.2
@@ -109,7 +112,7 @@ def test_retry_ladder_fixes_the_lithuanian_drift(api):
     assert "loop:repeated_phrase" in loop["checks"]["problems"]
     state = api.get(f"/api/v2/sessions/{sid}", headers=api.h).get_json()
     assert state["chunks"][1]["best_attempt_id"] == second["attempt_id"]
-    assert state["chunks"][1]["attempts"] == 2
+    assert state["chunks"][1]["attempts"] == 3  # default, forced ro, race
 
 
 def test_external_validation_is_stored_and_ranked(api):

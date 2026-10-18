@@ -322,6 +322,9 @@ class SessionService:
             at = gap["start"] + 0.15 if gap["start"] > 1.0 else gap["end"] - 0.15
             checks["suggested_split"] = round(c["start_sec"] + max(1.0, min(chunk_len - 1.0, at)), 2)
         checks["signals"]["language_probability"] = res.language_probability
+        # A forced language is reported back as "detected": it proves nothing about what
+        # was spoken (forcing English on Russian speech transliterates it). Probe instead.
+        checks["signals"]["language_forced"] = opts["language_mode"] == "fixed"
         if res.race_scores:
             checks["signals"]["race_scores"] = res.race_scores
         if res.dropped:
