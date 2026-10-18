@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -48,6 +48,11 @@ class ChunkResult:
     segments: List[Dict[str, Any]]
     language: Optional[str] = None
     duration: Optional[float] = None
+    # Segments the hallucination filter removed, as (text, reason).
+    dropped: List[Tuple[str, str]] = field(default_factory=list)
+    language_probability: Optional[float] = None
+    # Candidate-language race: confidence per language tried (higher = better fit).
+    race_scores: Optional[Dict[str, float]] = None
 
 
 def filter_segments(
@@ -69,6 +74,7 @@ def _plain_segment(seg: Any) -> Dict[str, Any]:
         "text": str(_seg_get(seg, "text", "")).strip(),
         "avg_logprob": float(_seg_get(seg, "avg_logprob", 0.0)),
         "no_speech_prob": float(_seg_get(seg, "no_speech_prob", 0.0)),
+        "compression_ratio": float(_seg_get(seg, "compression_ratio", 0.0)),
     }
 
 
@@ -220,6 +226,7 @@ class WhisperClient:
     ) -> ChunkResult:
         """Transcribe once per candidate language; keep the most confident decode."""
         best: Optional[Tuple[float, str, Any, list]] = None
+        scores: Dict[str, float] = {}
         for lang in self.candidate_languages:  # type: ignore[union-attr]
             resp = self._create_with_retry(audio_file, "verbose_json", lang)
             segments = _seg_get(resp, "segments", None) or []
@@ -231,6 +238,7 @@ class WhisperClient:
                     if filter_segments([seg], self.segment_filter)[0].strip()
                 ]
             score = _score_segments(scored_segments)
+            scores[lang] = round(score, 4) if score != float("-inf") else -99.0
             if best is None or score > best[0]:
                 best = (score, lang, resp, segments)
 
@@ -239,6 +247,7 @@ class WhisperClient:
             logger(f"  Language race: picked '{lang}' (confidence {score:.3f})")
         result = self._finalize_detailed(resp, logger, segments=segments)
         result.language = lang
+        result.race_scores = scores
         return result
 
     def _finalize(
@@ -257,6 +266,7 @@ class WhisperClient:
     ) -> ChunkResult:
         language = _seg_get(resp, "language", None) if not isinstance(resp, str) else None
         duration = _seg_get(resp, "duration", None) if not isinstance(resp, str) else None
+        lang_p = _seg_get(resp, "language_probability", None) if not isinstance(resp, str) else None
         if self._use_verbose:
             if segments is None:
                 segments = _seg_get(resp, "segments", None)
@@ -271,7 +281,9 @@ class WhisperClient:
                 else:
                     kept = [_plain_segment(s) for s in segments if str(_seg_get(s, "text", "")).strip()]
                     text = " ".join(s["text"] for s in kept).strip()
-                return ChunkResult(text, kept, language, duration)
+                    dropped = []
+                return ChunkResult(text, kept, language, duration, dropped=dropped,
+                                   language_probability=float(lang_p) if lang_p is not None else None)
             # No segments came back (empty/near-silent audio) -> use plain text.
         text = _extract_text(resp).strip()
         segs = [{"start": 0.0, "end": float(duration or 0.0), "text": text}] if text else []

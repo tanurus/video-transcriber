@@ -175,6 +175,39 @@ Optional fields: `profile_id`, `language`, `prompt`, `hotwords`, `title`,
 `recorded_at` (ISO time), `options` (JSON of any setting), `on_duplicate=new`.
 `GET /api/v1/jobs/<id>?text=1` returns status and text.
 
+## Chunk-level API (validated pipeline, `/api/v2`)
+
+For workflows (e.g. n8n) that check every chunk and retry the bad ones with
+different settings. Same Bearer tokens as `/api/v1`.
+
+1. Upload with `-F pipeline=validated` on `POST /api/v1/jobs`: the recording is
+   stored as **received** and not transcribed by the standard pipeline.
+2. `POST /api/v2/sessions {"job_id", "allowed_languages": ["ro","ru","en"], ...settings}`
+   prepares the audio once and returns the chunk plan (stable chunk ids).
+3. `POST /api/v2/sessions/<sid>/chunks/<cid>/transcribe {...settings, "label"}` returns
+   the text, timestamped segments and `checks`:
+   - `problems`: `wrong_language:<code>`, `loop:repeated_phrase`, `loop:compression_ratio`,
+     `low_coverage` (Whisper dropped part of the chunk — usually a sentence in a
+     second language), `empty`;
+   - `borderline`: passed, but Whisper was unsure;
+   - `suggested_split` for `low_coverage`.
+   Settings: any catalogue key, plus `language: "ro"` (fixed), `candidate_languages`
+   (race), `prompt`, `hotwords`, `beam_size`, …
+4. `POST …/chunks/<cid>/probe {"attempt_id"}` re-detects the language of each
+   segment's own audio. `mismatch: true` means a sentence was decoded in the wrong
+   language (often silently translated); `suggested_split` is where to cut.
+5. `POST …/chunks/<cid>/split {"at"}` and `…/recut {"start","end"}` change chunk
+   edges (neighbours follow; attempts made on the old edges become `stale`).
+6. `POST …/attempts/<aid>/validation {"passed": bool, ...}` stores an outside
+   validator's verdict; it counts when the best attempt is chosen.
+7. `POST /api/v2/sessions/<sid>/assemble {"choices": {cid: aid}, "report": {...}}` writes
+   the transcript (the received job, or a new version of a finished one), with a
+   per-chunk report in `data/reports/<job>.json`; unresolved chunks are listed in
+   `needs_review`.
+
+Tested live on mixed RO/RU/EN speech: the default pass dropped two sentences and
+translated a third; coverage + probe → split → re-transcribe recovered all of them.
+
 ## Notes
 - The web container never needs a public port; nothing is exposed to the internet.
 - The web form offers **Best** (`whisper-large-v3`) or **Fast** (`whisper-large-v3-turbo`,

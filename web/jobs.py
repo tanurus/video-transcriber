@@ -472,6 +472,8 @@ def start_cleanup_thread(
             try:
                 purge_old_videos(settings, storage=storage)
                 purge_stale_incoming(settings)
+                from .sessions import purge_old_sessions
+                purge_old_sessions(settings.data_dir / "sessions")
             except Exception:  # noqa: BLE001 - cleanup must never crash the app
                 pass
             time.sleep(interval_seconds)

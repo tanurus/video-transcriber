@@ -2,16 +2,19 @@
 
     curl -H "Authorization: Bearer vt_..." -F file=@meeting.m4a -F preset=accuracy \\
          http://<host>:18920/api/v1/jobs
+
+``-F pipeline=validated`` stores the recording without transcribing it, for the
+chunk-level pipeline (/api/v2) to pick up.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import tempfile
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
+from .auth import require_token
 from .intake import device_label, ingest, recorded_at_from_epoch_ms
 from .routes import job_json
 
@@ -20,15 +23,7 @@ bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 @bp.before_request
 def _auth():  # noqa: ANN202
-    header = request.headers.get("Authorization", "")
-    token = header[7:].strip() if header.lower().startswith("bearer ") else request.args.get("token", "")
-    if not token:
-        return jsonify({"error": "Missing API token (Settings → API tokens)."}), 401
-    record = current_app.config["STORAGE"].token_by_hash(hashlib.sha256(token.encode()).hexdigest())
-    if record is None:
-        return jsonify({"error": "Invalid or revoked API token."}), 401
-    request.environ["vt.token_name"] = record.name
-    return None
+    return require_token()
 
 
 @bp.post("/jobs")
@@ -65,10 +60,15 @@ def create_job():  # noqa: ANN202
         recorded_at=recorded, title=request.form.get("title"),
         on_duplicate=request.form.get("on_duplicate", "skip"),
     )
+    pipeline = (request.form.get("pipeline") or "standard").lower()
     if not result.duplicate:
-        jobs.submit(result.job_id)
+        if pipeline == "validated":
+            # Held for the chunk-level pipeline (n8n opens a /api/v2 session on it).
+            storage.update_status(result.job_id, "received")
+        else:
+            jobs.submit(result.job_id)
     job = storage.get_job(result.job_id)
-    return jsonify({"duplicate": result.duplicate, "job": job_json(job)}), (200 if result.duplicate else 201)
+    return jsonify({"duplicate": result.duplicate, "pipeline": pipeline, "job": job_json(job)}), (200 if result.duplicate else 201)
 
 
 @bp.get("/jobs/<job_id>")

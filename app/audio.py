@@ -450,3 +450,28 @@ def split_by_silence(
         # The muxer can merge a sliver at the end; offsets must still line up.
         offsets = offsets[: len(chunks)]
     return list(zip(chunks, offsets))
+
+
+def silence_cut_points(
+    audio_path: str | Path,
+    target_sec: float,
+    max_sec: float,
+    noise_db: str = "-30dB",
+    min_silence_sec: float = 0.5,
+) -> Tuple[float, List[float]]:
+    """(duration, interior cut times) for a pause-aligned split, without writing files."""
+    proc = _run_ffmpeg([require_ffmpeg(), "-i", str(audio_path), "-af",
+                        f"silencedetect=noise={noise_db}:d={min_silence_sec}", "-f", "null", "-"])
+    duration, silences = _parse_silences(proc.stderr.decode("utf-8", "replace"))
+    if duration is None:
+        raise RuntimeError("could not determine audio duration from ffmpeg output")
+    return duration, _compute_cut_points(duration, silences, target_sec, max_sec)
+
+
+def extract_segment(audio_path: str | Path, start: float, end: float, dest: str | Path) -> Path:
+    """Write [start, end) of ``audio_path`` to ``dest`` as 16 kHz mono FLAC."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run_ffmpeg([require_ffmpeg(), "-y", "-ss", f"{max(0.0, start):.3f}", "-to", f"{end:.3f}",
+                 "-i", str(audio_path), "-ac", "1", "-ar", "16000", "-c:a", "flac", str(dest)])
+    return dest
