@@ -118,6 +118,7 @@ class WhisperClient:
         language: str | None = None,
         segment_filter: SegmentFilter | None = None,
         candidate_languages: List[str] | None = None,
+        verbose_capable: bool | None = None,
     ) -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
@@ -128,7 +129,9 @@ class WhisperClient:
         # confidence result wins — this pins Whisper to a known language set (e.g.
         # ro/ru/en) so it can never drift into Polish/Ukrainian.
         self.candidate_languages = candidate_languages or None
-        self._verbose_ok = _supports_verbose(model)
+        # None = infer from the model name. The local GPU server always returns
+        # segment stats whatever its model is called, so it passes True.
+        self._verbose_ok = _supports_verbose(model) if verbose_capable is None else verbose_capable
         # Filtering and the race both need per-segment stats -> verbose_json.
         self._use_verbose = (
             segment_filter is not None or bool(self.candidate_languages)

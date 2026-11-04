@@ -1,12 +1,13 @@
 # Audio/Video to Transcript
 
-A small Python tool that extracts audio from a video file and sends it to an OpenAI-compatible Transcriptions API (OpenAI or Groq) to get a transcript, saving a `.txt` next to the original video. Runs as a CLI, a desktop GUI with a file queue, or a [browser app on a VPS](docs/deploy.md).
+A small Python tool that extracts audio from a video file and sends it to an OpenAI-compatible Transcriptions API (OpenAI, Groq, or the bundled local GPU server) to get a transcript, saving a `.txt` next to the original video. Runs as a CLI, a desktop GUI with a file queue, or a [browser app on a VPS](docs/deploy.md).
 
 ## Features
 - Extract audio from most video formats via ffmpeg
 - Silence-aware chunking: audio is split into short (~25–40s) segments at natural pauses, transcribed in parallel, and rejoined. Short chunks let Whisper re-detect the language on each utterance, which keeps multilingual meetings (e.g. Romanian + Ukrainian + Russian) from being garbled by a single wrong language
 - Confidence filtering: no-speech and repetition-loop hallucinations are dropped using Whisper's per-segment stats (Groq `whisper-large-v3`), and every drop is logged
 - Calls an OpenAI-compatible Transcriptions API — Groq (default model: `whisper-large-v3`) or OpenAI (default model: `gpt-4o-transcribe`)
+- Or runs fully local: `gpu_server/` serves Whisper `large-v3` on your own NVIDIA GPU (faster-whisper) with the same API, no per-minute cost — usable from the web app and, over Tailscale, from the desktop GUI on another machine
 - Transcribes in the spoken language: Whisper auto-detects the language of the recording (Russian, Romanian, …) and the transcript stays in that language for best accuracy
 - Saves transcript in the same folder as the input video
 - Desktop GUI: select a finished file to copy its transcript to the clipboard, open the `.txt`, or reveal it in the file manager (no console window flashes when ffmpeg runs)
@@ -14,7 +15,7 @@ A small Python tool that extracts audio from a video file and sends it to an Ope
 ## Requirements
 - Python 3.9+
 - ffmpeg available on PATH (https://ffmpeg.org/download.html)
-- A Groq or OpenAI API key with access to transcriptions
+- A Groq or OpenAI API key with access to transcriptions, **or** a reachable local GPU server (see [docs/deploy.md](docs/deploy.md))
 
 ## Setup (Windows PowerShell)
 ```powershell
@@ -67,7 +68,10 @@ your local `.env` is not stored in GitHub.
 ## Configuration
 You can customize behavior via environment variables (in your shell or `.env`, see `.env.example`):
 
-- `GROQ_API_KEY` / `OPENAI_API_KEY` (one required): If both are set, `GROQ_API_KEY` takes precedence and requests go to Groq's API.
+- `GROQ_API_KEY` / `OPENAI_API_KEY`: If both are set, `GROQ_API_KEY` takes precedence and requests go to Groq's API. Not needed when using a local GPU server.
+- `LOCAL_WHISPER_URL` (optional): URL of the bundled GPU server, e.g. `http://127.0.0.1:18921/v1` or `http://<machine>.<tailnet>.ts.net:18921/v1`. With it set, the local server is used whenever its `/health` answers; otherwise a cloud key is used if present.
+- `TRANSCRIBE_PROVIDER` (optional): `auto` (default) | `local` | `groq` | `openai` — force one backend.
+- `LOCAL_WHISPER_API_KEY` (optional): only if the GPU server was started with `WHISPER_API_KEY`.
 - `TRANSCRIBE_MODEL` (optional): Defaults to `whisper-large-v3` on Groq, `gpt-4o-transcribe` on OpenAI — the highest-accuracy option on each provider. Make sure the model you set exists on the provider in use.
 - `TRANSCRIBE_LANGUAGE` (optional): ISO-639-1 code (e.g. `ru`, `ro`) used as a hint when you know the spoken language up front. Leave unset to let Whisper auto-detect.
 - `CANDIDATE_LANGUAGES` (optional): Comma-separated language codes, such as `ro,ru,en`. On Whisper models, transcribe each chunk once per candidate and select the highest-confidence result. This takes precedence over `TRANSCRIBE_LANGUAGE` and increases API calls and processing time. Leave unset to disable; non-Whisper models use the normal single request.
@@ -89,18 +93,22 @@ Note: the transcript is written in the language spoken in the recording. Transcr
 
 You can run this as a browser app on a Linux VPS and reach it from any device on
 your Tailscale tailnet — upload a video, watch live progress, and download the
-transcript, with no local app running.
+transcript, with no local app running. If the VPS has an NVIDIA GPU, the bundled
+`gpu_server/` transcribes with Whisper large-v3 locally instead of a paid API.
 
-See [docs/deploy.md](docs/deploy.md) for full instructions. In short:
+See [docs/deploy.md](docs/deploy.md) for full instructions, including how to
+expose it on the tailnet without accidentally making it public.
 
-```bash
-git clone https://github.com/tanurus/video-transcriber.git && cd video-transcriber
-echo 'GROQ_API_KEY=gsk_...' > .env
-chmod +x deploy.sh && ./deploy.sh
-sudo tailscale serve --bg --https=443 http://127.0.0.1:8000
+### Using a VPS GPU from the desktop GUI
+
+Point the desktop app at the VPS GPU server over Tailscale by adding to `.env`:
+
+```
+LOCAL_WHISPER_URL=http://<machine>.<tailnet>.ts.net:18921/v1
 ```
 
-Then open `https://transcribe.<your-tailnet>.ts.net`.
+With a `GROQ_API_KEY` also set, the GUI falls back to Groq whenever the VPS is
+unreachable. Each run's log names the backend and model that were used.
 
 ## Notes
 - ffmpeg is required for extracting audio and chunking. If not found, install it with winget/choco or manually and reopen your terminal so PATH updates.

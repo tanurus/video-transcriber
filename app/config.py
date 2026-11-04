@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -8,6 +11,35 @@ from dotenv import load_dotenv
 
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+# The bundled GPU server (gpu_server/) listens here by default.
+DEFAULT_LOCAL_URL = "http://127.0.0.1:18921/v1"
+PROVIDERS = ("auto", "local", "groq", "openai")
+
+
+def health_url(base_url: str) -> str:
+    """``http://host:port/v1`` -> ``http://host:port/health``."""
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    return root + "/health"
+
+
+def local_health_error(base_url: str, timeout: float = 2.0) -> Optional[str]:
+    """Return None if the local Whisper server is ready, else a short reason."""
+    try:
+        with urllib.request.urlopen(health_url(base_url), timeout=timeout) as resp:
+            body = json.loads(resp.read() or b"{}")
+            if body.get("status") == "ok":
+                return None
+            return f"status {body.get('status')!r}"
+    except urllib.error.HTTPError as e:
+        # 503 carries a JSON body such as {"status": "no-gpu"}.
+        try:
+            return f"status {json.loads(e.read() or b'{}').get('status')!r}"
+        except Exception:  # noqa: BLE001
+            return f"HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001 - refused, timeout, DNS: all mean "not ready"
+        return str(getattr(e, "reason", e))
 
 
 @dataclass
@@ -43,28 +75,14 @@ class Config:
     logprob_threshold: float = -1.0
     compression_ratio_threshold: float = 2.4
 
+    # Which backend was chosen: "local" (bundled GPU server), "groq" or "openai".
+    provider: str = "openai"
+
     @staticmethod
     def load(env_path: Optional[str] = None) -> "Config":
         load_dotenv(dotenv_path=env_path, override=False)
 
-        groq_key = os.getenv("GROQ_API_KEY")
-        openai_key = os.getenv("OPENAI_API_KEY")
-
-        if groq_key:
-            api_key = groq_key
-            base_url = GROQ_BASE_URL
-            # whisper-large-v3 = Groq's highest-accuracy Whisper model
-            # (large-v3-turbo is faster but slightly less accurate).
-            default_model = "whisper-large-v3"
-        elif openai_key:
-            api_key = openai_key
-            base_url = None
-            default_model = "gpt-4o-transcribe"
-        else:
-            raise RuntimeError(
-                "No API key found. Set GROQ_API_KEY or OPENAI_API_KEY in your environment or .env file."
-            )
-
+        provider, api_key, base_url, default_model = _choose_provider()
         # "or default" (not getenv's default) so blank placeholders in .env
         # ("OPENAI_TIMEOUT=") behave like unset variables instead of crashing int().
         model = os.getenv("TRANSCRIBE_MODEL") or default_model
@@ -102,4 +120,83 @@ class Config:
             no_speech_threshold=no_speech_threshold,
             logprob_threshold=logprob_threshold,
             compression_ratio_threshold=compression_ratio_threshold,
+            provider=provider,
         )
+
+
+def _no_key_error() -> RuntimeError:
+    return RuntimeError(
+        "No transcription backend configured. Set LOCAL_WHISPER_URL (local GPU server), "
+        "GROQ_API_KEY or OPENAI_API_KEY in your environment or .env file."
+    )
+
+
+def _choose_provider() -> tuple:
+    """Return (provider, api_key, base_url, default_model) from the environment.
+
+    ``auto`` (the default) keeps the original behaviour when no local server is
+    configured: Groq if its key is set, else OpenAI. With LOCAL_WHISPER_URL set it
+    prefers that server whenever its /health answers, falling back to a cloud key.
+    """
+    provider = (os.getenv("TRANSCRIBE_PROVIDER") or "auto").strip().lower()
+    if provider not in PROVIDERS:
+        raise RuntimeError(
+            f"Unknown TRANSCRIBE_PROVIDER '{provider}'. Use one of: {', '.join(PROVIDERS)}."
+        )
+    groq_key = os.getenv("GROQ_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    local_url = os.getenv("LOCAL_WHISPER_URL") or None
+
+    def local() -> tuple:
+        url = local_url or DEFAULT_LOCAL_URL
+        # The OpenAI SDK refuses an empty key; the local server ignores it unless
+        # it was started with WHISPER_API_KEY.
+        key = os.getenv("LOCAL_WHISPER_API_KEY") or "local"
+        # whisper-large-v3 = the most accurate open Whisper model; the id contains
+        # "whisper" and the server maps it onto faster-whisper's "large-v3".
+        return ("local", key, url, "whisper-large-v3")
+
+    def groq() -> tuple:
+        if not groq_key:
+            raise RuntimeError("TRANSCRIBE_PROVIDER=groq but GROQ_API_KEY is not set.")
+        # whisper-large-v3 = Groq's highest-accuracy Whisper model
+        # (large-v3-turbo is faster but slightly less accurate).
+        return ("groq", groq_key, GROQ_BASE_URL, "whisper-large-v3")
+
+    def openai() -> tuple:
+        if not openai_key:
+            raise RuntimeError("TRANSCRIBE_PROVIDER=openai but OPENAI_API_KEY is not set.")
+        return ("openai", openai_key, None, "gpt-4o-transcribe")
+
+    def unreachable(reason: str) -> RuntimeError:
+        url = local_url or DEFAULT_LOCAL_URL
+        return RuntimeError(
+            f"Local Whisper server at {url} is not responding ({reason}). "
+            "Check the whisper-gpu service, or set a cloud API key as a fallback."
+        )
+
+    if provider == "local":
+        err = local_health_error(local_url or DEFAULT_LOCAL_URL)
+        if err:
+            raise unreachable(err)
+        return local()
+    if provider == "groq":
+        return groq()
+    if provider == "openai":
+        return openai()
+
+    # auto
+    if local_url:
+        err = local_health_error(local_url)
+        if err is None:
+            return local()
+        if groq_key:
+            return groq()
+        if openai_key:
+            return openai()
+        raise unreachable(err)
+    if groq_key:
+        return groq()
+    if openai_key:
+        return openai()
+    raise _no_key_error()

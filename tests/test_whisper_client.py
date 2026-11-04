@@ -274,3 +274,17 @@ def test_language_race_prefers_speech_over_filtered_repetition(tmp_path):
     f = tmp_path / "a.mp3"
     f.write_bytes(b"x")
     assert client.transcribe_file(f) == "valid speech"
+
+
+# --- provider-aware verbose support ------------------------------------------
+
+def test_verbose_capable_overrides_model_name_check(tmp_path):
+    # A local model id like "large-v3" lacks "whisper"; the local server still
+    # returns segment stats, so filtering must stay on when told so explicitly.
+    c = WhisperClient(api_key="k", model="large-v3", segment_filter=SegmentFilter(), verbose_capable=True)
+    assert c._use_verbose is True
+
+
+def test_verbose_capable_defaults_to_model_name_check():
+    c = WhisperClient(api_key="k", model="gpt-4o-transcribe", segment_filter=SegmentFilter())
+    assert c._use_verbose is False

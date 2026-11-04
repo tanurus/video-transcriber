@@ -127,12 +127,16 @@ def transcribe_video(
             base_url=cfg.base_url,
             language=cfg.language,
             candidate_languages=cfg.candidate_languages,
+            verbose_capable=True if cfg.provider == "local" else None,
             segment_filter=SegmentFilter(
                 no_speech_threshold=cfg.no_speech_threshold,
                 logprob_threshold=cfg.logprob_threshold,
                 compression_ratio_threshold=cfg.compression_ratio_threshold,
             ),
         )
+
+        where = f" at {cfg.base_url}" if cfg.provider == "local" else ""
+        log(f"Backend: {cfg.provider}, model {cfg.model}{where}")
 
         total_segments = len(audio_files)
         workers = max(1, min(cfg.max_concurrency, total_segments))

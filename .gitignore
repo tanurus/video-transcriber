@@ -8,3 +8,4 @@ avtx_chunks_*/
 data/
 localdata/
 start_app.bat
+.venv-gpu/
