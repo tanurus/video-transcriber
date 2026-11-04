@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-VALID_STATUSES = {"queued", "running", "done", "error", "interrupted"}
+VALID_STATUSES = {"queued", "running", "done", "error", "interrupted", "received"}
 AI_STATUSES = {"none", "queued", "running", "done", "error"}
 SYNC_STATUSES = {"none", "pending", "synced", "error"}
 

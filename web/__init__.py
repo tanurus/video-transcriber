@@ -92,10 +92,18 @@ def create_app(
     app.config["CONNECTIONS"] = connections
     app.config["AI_FACTORY"] = ai_factory
 
+    from .sessions import SessionService
+
+    if hasattr(job_manager, "kept_audio_path"):
+        from app.config import Config
+        app.config["SESSIONS"] = SessionService(storage, job_manager, cfg_loader=getattr(job_manager, "cfg_loader", Config.load))
+
     register_routes(app)
     from .api_v1 import bp as api_v1
+    from .api_v2 import bp as api_v2
 
     app.register_blueprint(api_v1)
+    app.register_blueprint(api_v2)
 
     if start_background:
         start_cleanup_thread(settings, storage)

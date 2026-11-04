@@ -208,6 +208,7 @@ class ModelManager:
         return {
             "task": "transcribe",
             "language": info.language,
+            "language_probability": float(getattr(info, "language_probability", 0.0) or 0.0),
             "duration": float(info.duration),
             "text": " ".join(s["text"].strip() for s in segs if s["text"].strip()),
             "segments": segs,
