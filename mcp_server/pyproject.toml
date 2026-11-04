@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transcriber-mcp"
+version = "0.1.0"
+description = "MCP server for the video-transcriber web app: transcribe, search and configure over its token API."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3,<3",
+    "httpx>=0.27",
+    "anyio>=4",
+]
+
+[project.scripts]
+transcriber-mcp = "transcriber_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["transcriber_mcp"]

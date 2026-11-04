@@ -101,8 +101,10 @@ def create_app(
     register_routes(app)
     from .api_v1 import bp as api_v1
     from .api_v2 import bp as api_v2
+    from .api_config import bp as api_config
 
     app.register_blueprint(api_v1)
+    app.register_blueprint(api_config)
     app.register_blueprint(api_v2)
 
     if start_background:
