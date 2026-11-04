@@ -15,7 +15,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 
 from .auth import require_token
-from .intake import device_label, ingest, recorded_at_from_epoch_ms
+from .intake import ChunkedUploads, UploadError, device_label, ingest, recorded_at_from_epoch_ms, recorded_at_from_name
 from .routes import job_json
 
 bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -79,6 +79,7 @@ def get_job(job_id):  # noqa: ANN202
     if job is None:
         return jsonify({"error": "not found"}), 404
     data = job_json(job)
+    data["settings"] = {k: v for k, v in job.settings.items() if not k.startswith("_")}
     if job.status == "done" and request.args.get("text") == "1":
         data["transcript_raw"] = jobs.read_text(job.transcript_path)
         data["transcript_clean"] = jobs.read_text(job.clean_text_path)
@@ -89,4 +90,85 @@ def get_job(job_id):  # noqa: ANN202
 def list_jobs():  # noqa: ANN202
     storage = current_app.config["STORAGE"]
     limit = min(200, max(1, request.args.get("limit", default=50, type=int)))
-    return jsonify({"jobs": [job_json(j) for j in storage.search_jobs(limit=limit)]})
+    found = storage.search_jobs(
+        text=(request.args.get("q") or "").strip()[:200],
+        status=request.args.get("status") or "",
+        source=request.args.get("source") or "",
+        latest_only=request.args.get("latest_only") in ("1", "true", "yes"),
+        limit=limit,
+    )
+    return jsonify({"jobs": [job_json(j) for j in found]})
+
+
+# --- resumable uploads (the MCP server uses these for multi-GB recordings) --------------------
+
+def _uploads() -> ChunkedUploads:
+    settings = current_app.config["SETTINGS"]
+    return ChunkedUploads(settings.data_dir / "incoming", settings.allowed_ext, settings.max_file_mb * 1024 * 1024)
+
+
+@bp.post("/uploads")
+def upload_start():  # noqa: ANN202
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(_uploads().start(str(body.get("filename", "")), int(body.get("size") or 0),
+                                        body.get("last_modified"))), 201
+    except UploadError as e:
+        return jsonify({"error": str(e)}), e.status
+    except (TypeError, ValueError):
+        return jsonify({"error": "'size' must be a number."}), 400
+
+
+@bp.get("/uploads/<upload_id>")
+def upload_status(upload_id):  # noqa: ANN202
+    try:
+        return jsonify(_uploads().status(upload_id))
+    except UploadError as e:
+        return jsonify({"error": str(e)}), e.status
+
+
+@bp.put("/uploads/<upload_id>")
+def upload_chunk(upload_id):  # noqa: ANN202
+    try:
+        offset = int(request.args.get("offset", "-1"))
+        return jsonify(_uploads().append(upload_id, offset, request.get_data(cache=False)))
+    except UploadError as e:
+        return jsonify({"error": str(e)}), e.status
+    except ValueError:
+        return jsonify({"error": "bad offset"}), 400
+
+
+@bp.post("/uploads/<upload_id>/complete")
+def upload_complete(upload_id):  # noqa: ANN202
+    """Turn a finished upload into a job. Same fields as POST /jobs, as JSON."""
+    settings = current_app.config["SETTINGS"]
+    storage = current_app.config["STORAGE"]
+    jobs = current_app.config["JOBS"]
+    body = request.get_json(silent=True) or {}
+    raw = body.get("options") or {}
+    if not isinstance(raw, dict):
+        return jsonify({"error": "'options' must be a JSON object."}), 400
+    for key in ("profile_id", "language", "prompt", "hotwords", "model"):
+        if body.get(key):
+            raw.setdefault(key, body[key])
+    up = _uploads()
+    try:
+        part, meta = up.finish(upload_id)
+    except UploadError as e:
+        return jsonify({"error": str(e)}), e.status
+    name = str(body.get("filename") or meta["filename"])
+    recorded = (body.get("recorded_at") or recorded_at_from_name(name)
+                or recorded_at_from_epoch_ms(meta.get("last_modified")))
+    result = ingest(
+        storage, settings.uploads_dir, part, name,
+        raw_options=raw, preset=body.get("preset"),
+        source=str(body.get("source") or "api")[:40],
+        source_detail=str(body.get("source_detail") or request.environ.get("vt.token_name", ""))[:200],
+        recorded_at=recorded, title=body.get("title"),
+        on_duplicate=body.get("on_duplicate", "skip"),
+    )
+    up.discard(upload_id)
+    if not result.duplicate:
+        jobs.submit(result.job_id)
+    job = storage.get_job(result.job_id)
+    return jsonify({"duplicate": result.duplicate, "job": job_json(job)}), (200 if result.duplicate else 201)

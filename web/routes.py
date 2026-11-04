@@ -285,41 +285,10 @@ def register_routes(app: Flask) -> None:
 
     @app.post("/api/jobs/bulk")
     def jobs_bulk():  # noqa: ANN202
-        _settings, storage, jobs = _svc()
-        body = request.get_json(silent=True) or {}
-        action = body.get("action")
-        ids = [str(i) for i in (body.get("ids") or [])][:500]
-        if not ids:
-            return jsonify({"error": "Select at least one transcript."}), 400
-        conns = current_app.config["CONNECTIONS"].load()
-        if action == "sync":
-            if not conns.supabase_ready:
-                return jsonify({"error": "Connect Supabase first (Settings → Connections)."}), 400
-            n = jobs.mark_sync(ids)
-            return jsonify({"message": f"Queued {n} transcript(s) for Supabase.", "count": n})
-        if action == "ai":
-            if not conns.ai_ready:
-                return jsonify({"error": "Add an OpenAI key first (Settings → Connections)."}), 400
-            n = jobs.enqueue_ai(ids)
-            return jsonify({"message": f"AI finishing queued for {n} transcript(s).", "count": n})
-        if action == "regenerate":
-            raw = body.get("options") or {}
-            preset = body.get("preset") or None
-            keep = bool(body.get("keep_base", False))
-            created, failed = [], []
-            for job_id in ids:
-                try:
-                    created.append(jobs.regenerate(job_id, raw, preset=preset, keep_base=keep))
-                except Exception as e:  # noqa: BLE001
-                    failed.append(f"{job_id[:8]}: {e}")
-            msg = f"Regenerating {len(created)} transcript(s)."
-            if failed:
-                msg += " Could not regenerate: " + "; ".join(failed)
-            return jsonify({"message": msg, "created": created, "failed": failed})
-        if action == "delete":
-            n = jobs.delete(ids)
-            return jsonify({"message": f"Deleted {n} transcript(s).", "count": n})
-        return jsonify({"error": f"Unknown action {action!r}"}), 400
+        _settings, _storage, jobs = _svc()
+        payload, status = run_bulk(jobs, current_app.config["CONNECTIONS"].load(),
+                                   request.get_json(silent=True) or {})
+        return jsonify(payload), status
 
     @app.route("/download/<job_id>")
     def download(job_id):  # noqa: ANN202
@@ -458,17 +427,61 @@ def register_routes(app: Flask) -> None:
 
     @app.get("/api/health")
     def health():  # noqa: ANN202
-        _settings, storage, _jobs = _svc()
-        from app.config import local_health_error
-        import os
-        url = os.getenv("LOCAL_WHISPER_URL") or ""
-        gpu = None
-        if url:
-            err = local_health_error(url, timeout=2)
-            gpu = {"ok": err is None, "message": err or "ready"}
-        conns = current_app.config["CONNECTIONS"].load()
-        return jsonify({"gpu": gpu, "counts": storage.counts(), "ai_ready": conns.ai_ready,
-                        "supabase_ready": conns.supabase_ready})
+        return jsonify(health_payload())
+
+
+def run_bulk(jobs, conns, body: dict, allowed=("sync", "ai", "regenerate", "delete")) -> tuple:
+    """Apply one library action to many transcripts. Shared by the UI and the token API."""
+    action = body.get("action")
+    ids = [str(i) for i in (body.get("ids") or [])][:500]
+    if action not in allowed:
+        return {"error": f"Unknown action {action!r}"}, 400
+    if not ids:
+        return {"error": "Select at least one transcript."}, 400
+    if action == "sync":
+        if not conns.supabase_ready:
+            return {"error": "Connect Supabase first (Settings → Connections)."}, 400
+        n = jobs.mark_sync(ids)
+        return {"message": f"Queued {n} transcript(s) for Supabase.", "count": n}, 200
+    if action == "ai":
+        if not conns.ai_ready:
+            return {"error": "Add an OpenAI key first (Settings → Connections)."}, 400
+        n = jobs.enqueue_ai(ids)
+        return {"message": f"AI finishing queued for {n} transcript(s).", "count": n}, 200
+    if action == "regenerate":
+        raw = body.get("options") or {}
+        if not isinstance(raw, dict):
+            return {"error": "'options' must be an object."}, 400
+        preset = body.get("preset") or None
+        keep = bool(body.get("keep_base", False))
+        created, failed = [], []
+        for job_id in ids:
+            try:
+                created.append(jobs.regenerate(job_id, raw, preset=preset, keep_base=keep))
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{job_id[:8]}: {e}")
+        msg = f"Regenerating {len(created)} transcript(s)."
+        if failed:
+            msg += " Could not regenerate: " + "; ".join(failed)
+        return {"message": msg, "created": created, "failed": failed}, 200
+    n = jobs.delete(ids)
+    return {"message": f"Deleted {n} transcript(s).", "count": n}, 200
+
+
+def health_payload() -> dict:
+    """GPU reachability, library counts and which connections are ready."""
+    import os
+    from app.config import local_health_error
+
+    storage = current_app.config["STORAGE"]
+    url = os.getenv("LOCAL_WHISPER_URL") or ""
+    gpu = None
+    if url:
+        err = local_health_error(url, timeout=2)
+        gpu = {"ok": err is None, "message": err or "ready"}
+    conns = current_app.config["CONNECTIONS"].load()
+    return {"gpu": gpu, "counts": storage.counts(), "ai_ready": conns.ai_ready,
+            "supabase_ready": conns.supabase_ready}
 
 
 def _disposition(name: str) -> str:

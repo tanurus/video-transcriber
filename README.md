@@ -128,6 +128,22 @@ LOCAL_WHISPER_URL=http://<machine>.<tailnet>.ts.net:18921/v1
 With a `GROQ_API_KEY` also set, the GUI falls back to Groq whenever the VPS is
 unreachable. Each run's log names the backend and model that were used.
 
+## Use it from Claude (MCP server)
+
+`mcp_server/` is an MCP server you run on any computer that can reach the web app. From
+Claude Code or Claude Desktop you can transcribe a local file, search and read transcripts,
+regenerate them, and change the default settings and profiles, all in plain language.
+
+```
+claude mcp add transcriber --scope user \
+  -e TRANSCRIBER_URL=http://<machine>.<tailnet>.ts.net:18920 \
+  -e TRANSCRIBER_TOKEN=vt_... \
+  -- uvx --from "git+https://github.com/tanurus/video-transcriber#subdirectory=mcp_server" transcriber-mcp
+```
+
+Create the token in the web app under **Settings → API tokens**. Keys, tokens and deletion
+stay in the web UI. Details and the Claude Desktop config: [mcp_server/README.md](mcp_server/README.md).
+
 ## Notes
 - ffmpeg is required for extracting audio and chunking. If not found, install it with winget/choco or manually and reopen your terminal so PATH updates.
 - The app uses temporary directories for intermediate audio/chunks. They are cleaned up automatically.
