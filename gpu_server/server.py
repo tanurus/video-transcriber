@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from flask import Flask, Response, jsonify, request
 
-from .model_manager import ModelManager, UnknownModelError
+from .model_manager import ModelManager, UnknownModelError, parse_decode_options
 
 SUPPORTED_FORMATS = {"json", "text", "verbose_json"}
 
@@ -118,7 +118,8 @@ def create_app(
             return _error("temperature must be a number.", 400)
         try:
             manager.resolve(request.form.get("model") or "")
-        except UnknownModelError as e:
+            decode = parse_decode_options(request.form)
+        except (UnknownModelError, ValueError) as e:
             return _error(str(e), 400)
 
         # Keep the extension: the decoder sniffs the container from it.
@@ -133,6 +134,7 @@ def create_app(
                 language=request.form.get("language") or None,
                 temperature=temperature,
                 prompt=request.form.get("prompt") or None,
+                decode=decode,
             )
         except Exception as e:  # noqa: BLE001 - surface as an API error, not a stack trace
             return _error(f"Transcription failed: {e}", 500, "server_error")

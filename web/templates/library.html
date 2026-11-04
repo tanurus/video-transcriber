@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_options.html" import options_form with context %}
+{% block title %}Library — Transcriber{% endblock %}
+{% block page %}library{% endblock %}
+{% block content %}
+<form class="filters card" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search titles, files, descriptions, tags…" aria-label="Search">
+  <select name="status" aria-label="Status">
+    <option value="">Any status</option>
+    {% for s in ['done', 'running', 'queued', 'error', 'interrupted'] %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s|capitalize }}</option>{% endfor %}
+  </select>
+  <select name="sync" aria-label="Supabase">
+    <option value="">Any Supabase state</option>
+    {% for s, lab in [('none', 'Not sent'), ('pending', 'Sending'), ('synced', 'In Supabase'), ('error', 'Send failed')] %}
+      <option value="{{ s }}" {% if sync == s %}selected{% endif %}>{{ lab }}</option>{% endfor %}
+  </select>
+  <label class="check"><input type="checkbox" name="all_versions" value="1" {% if not latest %}checked{% endif %}> All versions</label>
+  <button type="submit">Filter</button>
+</form>
+
+<div class="lib-head">
+  <label class="check"><input type="checkbox" id="select-all"> <span>Select all ({{ jobs|length }})</span></label>
+  {% if not conns.supabase_ready %}<span class="muted small">Supabase not connected — <a href="{{ url_for('settings_page') }}#connections">set it up once</a></span>{% endif %}
+</div>
+
+<ul class="library" id="library">
+  {% for job in jobs %}
+  <li class="item" data-id="{{ job.id }}" data-status="{{ job.status }}">
+    <label class="pick"><input type="checkbox" class="pick-box" value="{{ job.id }}" aria-label="Select {{ job.display_name }}"></label>
+    <div class="body">
+      <a class="title" href="{{ url_for('job_page', job_id=job.id) }}">{{ job.display_name }}</a>
+      {% if job.description %}<p class="desc">{{ job.description }}</p>{% endif %}
+      <p class="meta">
+        <time data-local datetime="{{ job.recorded_at or job.created_at }}" title="{{ 'Recorded' if job.recorded_at else 'Uploaded' }}">{{ (job.recorded_at or job.created_at)[:16]|replace('T', ' ') }}</time>
+        {% if job.duration_sec %}<span>{{ (job.duration_sec // 60)|int }} min {{ (job.duration_sec % 60)|int }} s</span>{% endif %}
+        {% if job.languages %}<span>{{ job.languages|replace(',', ' · ')|upper }}</span>{% endif %}
+        {% if (job.version or 1) > 1 %}<span>v{{ job.version }}</span>{% endif %}
+        {% if job.source_detail %}<span>{{ job.source_detail }}</span>{% endif %}
+        {% for t in job.tag_list %}<span class="tag">#{{ t }}</span>{% endfor %}
+      </p>
+    </div>
+    <div class="pills" data-pills></div>
+  </li>
+  {% else %}
+  <li class="muted empty">No transcripts match. <a href="{{ url_for('index') }}">Upload some →</a></li>
+  {% endfor %}
+</ul>
+
+<div id="bulkbar" class="bulkbar" hidden>
+  <span><b id="sel-count">0</b> selected</span>
+  <button data-bulk="sync" class="primary">Send to Supabase</button>
+  <button data-bulk="ai">AI clean + title</button>
+  <button data-bulk="regenerate">Regenerate…</button>
+  <div class="menu">
+    <button type="button" data-menu>Download ▾</button>
+    <div class="menu-items" hidden>
+      <a data-zip="best">Best text (.zip)</a>
+      <a data-zip="clean">Clean text</a>
+      <a data-zip="raw">Raw text</a>
+      <a data-zip="srt">Subtitles (.srt)</a>
+      <a data-zip="json">Full records (.json)</a>
+    </div>
+  </div>
+  <button data-bulk="delete" class="danger">Delete</button>
+</div>
+
+<dialog id="regen-dialog" class="sheet">
+  <form method="dialog" id="regen-form">
+    <h2>Regenerate <span id="regen-count"></span> transcript(s)</h2>
+    <p class="muted">Each becomes a new version; the originals stay. Uses the kept lossless audio, so it works even after the video was purged.</p>
+    {{ options_form(catalog, groups, presets, values, profiles, show_after=True, open_advanced=False) }}
+    <label class="check"><input type="checkbox" name="keep_base" checked> Keep each transcript's own settings and apply only what you change here (untick: all get exactly these settings)</label>
+    <div class="actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button id="regen-go" class="primary" value="go">Regenerate</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}

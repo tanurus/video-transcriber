@@ -300,3 +300,153 @@ def chunk_audio_by_silence(
         shutil.rmtree(out_dir, ignore_errors=True)
         return [audio_path]
     return chunks
+
+
+# --- lossless preparation pipeline (web app) -------------------------------------
+#
+# The original MP3 path above re-encodes lossy audio before Whisper. The web
+# pipeline instead keeps one lossless 16 kHz mono FLAC per recording (so a job
+# can be regenerated long after the uploaded video is purged) and derives the
+# prepared audio from it with an explicit, logged filter chain.
+
+LUFS_TARGET = -16.0
+MAX_GAIN_DB = 20.0
+_LUFS_RE = re.compile(r"^\s*I:\s*(-?\d+(?:\.\d+)?)\s*LUFS", re.MULTILINE)
+
+DENOISE_FILTERS = {
+    "light": "afftdn=nr=10:nf=-40:tn=1",
+    "strong": "afftdn=nr=25:nf=-30:tn=1",
+}
+
+
+def probe_duration(path: str | Path) -> Optional[float]:
+    """Media duration in seconds (ffprobe, falling back to ffmpeg's banner)."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        try:
+            proc = _run_ffmpeg([ffprobe, "-v", "error", "-show_entries", "format=duration",
+                                "-of", "default=noprint_wrappers=1:nokey=1", str(path)])
+            return float(proc.stdout.decode().strip())
+        except Exception:  # noqa: BLE001 - fall through to the banner parse
+            pass
+    try:
+        proc = subprocess.run([require_ffmpeg(), "-i", str(path)], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=120, **_NO_WINDOW)
+        duration, _ = _parse_silences(proc.stderr.decode("utf-8", "replace"))
+        return duration
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def extract_lossless(src: str | Path, dest: str | Path, sample_rate: int = 16000) -> Path:
+    """Decode any audio/video into mono 16 kHz FLAC — Whisper's native format, no lossy step."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.stem + ".partial" + dest.suffix)
+    _run_ffmpeg([require_ffmpeg(), "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", str(sample_rate),
+                 "-c:a", "flac", str(tmp)])
+    tmp.replace(dest)
+    return dest
+
+
+def measure_loudness(path: str | Path, pre_filter: str = "") -> Optional[float]:
+    """Integrated loudness (LUFS, EBU R128) of the audio after ``pre_filter``."""
+    chain = (pre_filter + "," if pre_filter else "") + "ebur128"
+    proc = _run_ffmpeg([require_ffmpeg(), "-nostats", "-i", str(path), "-af", chain, "-f", "null", "-"])
+    found = _LUFS_RE.findall(proc.stderr.decode("utf-8", "replace"))
+    if not found:
+        return None
+    value = float(found[-1])
+    return None if value <= -70 else value  # -70 = silence gate, nothing to measure
+
+
+def cleanup_filters(denoise: str = "off", highpass: bool = False,
+                    rnnoise_model: Optional[str] = None) -> Tuple[str, List[str]]:
+    """ffmpeg filter chain for the cleanup step, plus notes worth logging."""
+    parts: List[str] = []
+    notes: List[str] = []
+    if highpass:
+        parts.append("highpass=f=80")
+    if denoise == "rnnoise":
+        if rnnoise_model and Path(rnnoise_model).exists():
+            # RNNoise models are trained at 48 kHz.
+            parts.append(f"aresample=48000,arnndn=m={rnnoise_model},aresample=16000")
+        else:
+            notes.append("RNNoise model not found; using light denoise instead")
+            parts.append(DENOISE_FILTERS["light"])
+    elif denoise in DENOISE_FILTERS:
+        parts.append(DENOISE_FILTERS[denoise])
+    return ",".join(parts), notes
+
+
+def normalization_gain(lufs: Optional[float]) -> float:
+    """Single linear gain towards -16 LUFS, capped so room tone is never blown up."""
+    if lufs is None:
+        return 0.0
+    return round(max(-MAX_GAIN_DB, min(MAX_GAIN_DB, LUFS_TARGET - lufs)), 2)
+
+
+def prepare_audio(
+    src: str | Path,
+    dest: str | Path,
+    normalize: bool = True,
+    denoise: str = "off",
+    highpass: bool = False,
+    rnnoise_model: Optional[str] = None,
+    log=None,
+) -> Path:
+    """Apply cleanup + loudness normalization to lossless audio; writes FLAC."""
+    log = log or (lambda _m: None)
+    chain, notes = cleanup_filters(denoise, highpass, rnnoise_model)
+    for n in notes:
+        log(f"  {n}")
+    filters = [chain] if chain else []
+    if normalize:
+        lufs = measure_loudness(src, chain)
+        gain = normalization_gain(lufs)
+        log(f"  Loudness {lufs if lufs is not None else 'n/a'} LUFS -> gain {gain:+.1f} dB")
+        if gain:
+            # alimiter only touches peaks, so a boost never turns into a cut.
+            filters.append(f"volume={gain}dB,alimiter=limit=0.89:level=false")
+    dest = Path(dest)
+    if not filters:
+        shutil.copyfile(src, dest)
+        return dest
+    _run_ffmpeg([require_ffmpeg(), "-y", "-i", str(src), "-af", ",".join(filters),
+                 "-ac", "1", "-ar", "16000", "-c:a", "flac", str(dest)])
+    return dest
+
+
+def split_by_silence(
+    audio_path: str | Path,
+    target_sec: float,
+    max_sec: float,
+    noise_db: str = "-30dB",
+    min_silence_sec: float = 0.5,
+    out_dir: Optional[str | Path] = None,
+) -> List[Tuple[Path, float]]:
+    """Silence-aware split that also reports each chunk's start offset (seconds).
+
+    Offsets let chunk-relative Whisper timestamps map back onto the recording.
+    """
+    audio_path = Path(audio_path)
+    proc = _run_ffmpeg([require_ffmpeg(), "-i", str(audio_path), "-af",
+                        f"silencedetect=noise={noise_db}:d={min_silence_sec}", "-f", "null", "-"])
+    duration, silences = _parse_silences(proc.stderr.decode("utf-8", "replace"))
+    if duration is None:
+        raise RuntimeError("could not determine audio duration from ffmpeg output")
+    cuts = _compute_cut_points(duration, silences, target_sec, max_sec)
+    if not cuts:
+        return [(audio_path, 0.0)]
+    out = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="avtx_chunks_"))
+    out.mkdir(parents=True, exist_ok=True)
+    suffix = audio_path.suffix or ".flac"
+    _run_ffmpeg([require_ffmpeg(), "-y", "-i", str(audio_path), "-f", "segment",
+                 "-segment_times", ",".join(f"{c:.3f}" for c in cuts), "-reset_timestamps", "1",
+                 "-c", "copy", str(out / f"part%04d{suffix}")])
+    chunks = sorted(out.glob(f"part*{suffix}"))
+    offsets = [0.0] + cuts
+    if len(chunks) != len(offsets):
+        # The muxer can merge a sliver at the end; offsets must still line up.
+        offsets = offsets[: len(chunks)]
+    return list(zip(chunks, offsets))

@@ -122,7 +122,11 @@ Gotchas:
 
 ## Where data lives
 - `./data/app.db` — job history (SQLite)
-- `./data/uploads/<job-id>/` — uploaded videos (auto-deleted after `RETAIN_VIDEO_DAYS`, default 30); a `.options.json` beside the video holds the quality chosen on the form
+- `./data/uploads/<job-id>/` — uploaded videos (auto-deleted after `RETAIN_VIDEO_DAYS`, default 30)
+- `./data/audio/<job-id>.flac` — kept lossless 16 kHz audio per recording (never purged; makes regenerate work)
+- `./data/segments/`, `./data/clean/`, `./data/ai/`, `./data/logs/` — timestamps, AI-cleaned text, AI metadata, per-job logs
+- `./data/connections.json` (mode 0600) — OpenAI and Supabase settings entered in the UI; keys are never shown back
+- `./data/incoming/` — unfinished chunked uploads (dropped after 48 h)
 - `./data/transcripts/<job-id>.txt` — transcripts (kept forever)
 
 ## Configuration (set in `docker-compose.yml` or `.env`)
@@ -141,6 +145,35 @@ language. On a test clip switching Romanian / Russian / English every ~8 s,
 25/40 s garbled about half the sentences while `CHUNK_TARGET_SEC=8`,
 `CHUNK_MAX_SEC=15` got every sentence right (large-v3, ~12 s per 2 min of audio
 on an RTX 4060 Ti).
+
+## Connecting OpenAI and Supabase (once, in the UI)
+
+Open **Settings → Connections**:
+
+- **OpenAI** — API key, model (press *Test* to list the models your key can use)
+  and the language for titles. Any OpenAI-compatible base URL works.
+- **Supabase** — project URL, the `service_role` (or `sb_secret_…`) key and a table
+  name. Run the **setup SQL** shown there once in the Supabase SQL editor, then press
+  *Test*. The table has row-level security on with no policies, so only the service
+  key can read or write it; add policies if you want to expose it.
+
+Transcripts queue for Supabase automatically when "Send to Supabase" is on, or in
+bulk from the library. Failed sends retry with backoff (1 min doubling to 1 h)
+until they land; the library shows "Supabase: retrying" with the reason.
+
+## Sending recordings from other devices
+
+Any tailnet device can open the web app. For automatic sending, create a token
+in **Settings → Other devices & API** and post files to `/api/v1/jobs`:
+
+```bash
+curl -H "Authorization: Bearer vt_..." -F file=@meeting.m4a -F preset=accuracy \
+     -F source=phone http://<machine>.<tailnet>.ts.net:8000/api/v1/jobs
+```
+
+Optional fields: `profile_id`, `language`, `prompt`, `hotwords`, `title`,
+`recorded_at` (ISO time), `options` (JSON of any setting), `on_duplicate=new`.
+`GET /api/v1/jobs/<id>?text=1` returns status and text.
 
 ## Notes
 - The web container never needs a public port; nothing is exposed to the internet.

@@ -1,38 +1,46 @@
 {% extends "base.html" %}
+{% from "_options.html" import options_form with context %}
+{% block page %}upload{% endblock %}
 {% block content %}
-<h1>Upload a video to transcribe</h1>
-<form id="upload-form" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
-  <input id="file-input" type="file" name="video" accept="video/*,audio/*" required>
-  <label for="quality-select">Quality</label>
-  <select id="quality-select" name="quality">
-    <option value="best" selected>Best (Whisper large-v3)</option>
-    <option value="fast">Fast (large-v3-turbo — quicker, slightly less accurate)</option>
-  </select>
-  <button id="submit-btn" type="submit">Start transcription</button>
+<section class="hero">
+  <h1>Drop recordings, get clean transcripts</h1>
+  <p class="muted">Any number of files at once — meetings, voice notes, videos. Whisper large-v3 on the home GPU,
+    {% if conns.ai_ready %}AI clean-up and titles{% else %}<a href="{{ url_for('settings_page') }}#connections">AI clean-up</a>{% endif %},
+    and {% if conns.supabase_ready %}delivery to Supabase{% else %}<a href="{{ url_for('settings_page') }}#connections">delivery to Supabase</a>{% endif %}.</p>
+</section>
+
+<form id="upload-form" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data" class="card">
+  <label id="dropzone" class="dropzone" for="file-input">
+    <input id="file-input" type="file" name="video" multiple
+           accept="audio/*,video/*,{% for e in allowed %}.{{ e }}{% if not loop.last %},{% endif %}{% endfor %}">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+    <strong>Tap to choose files</strong><span class="muted"> or drag them here</span>
+    <small class="muted">{{ allowed|join(' · ') }} — big files upload in resumable pieces</small>
+  </label>
+  <ul id="file-list" class="file-list" hidden></ul>
+
+  {{ options_form(catalog, groups, presets, values, profiles) }}
+
+  <div class="actions sticky-actions">
+    <button id="submit-btn" class="primary" type="submit" disabled>Start transcription</button>
+    <button id="save-defaults" class="ghost" type="button" title="Use these settings for every new upload, on every device">Save as my defaults</button>
+  </div>
 </form>
 
-<div id="upload-progress" hidden aria-live="polite">
-  <div class="progress-label">
-    <span id="progress-text">Uploading…</span>
-    <span id="progress-pct">0%</span>
+<section class="card">
+  <div class="row-between">
+    <h2>Recent</h2>
+    <a href="{{ url_for('library') }}">Open library →</a>
   </div>
-  <div class="progress-track"><div id="progress-bar" class="progress-fill"></div></div>
-</div>
-
-<h2>Recent transcripts</h2>
-<ul class="recent">
-{% for job in jobs %}
-  <li>
-    <a href="{{ url_for('job_page', job_id=job.id) }}">{{ job.original_name }}</a>
-    — {{ job.status }}
-    {% if job.status == 'done' %}
-      (<a href="{{ url_for('download', job_id=job.id) }}">download</a>)
-    {% endif %}
-  </li>
-{% else %}
-  <li>None yet.</li>
-{% endfor %}
-</ul>
-
-<script src="{{ url_for('static', filename='upload.js') }}"></script>
+  <ul id="recent" class="recent" data-ids="{{ jobs|map(attribute='id')|join(',') }}">
+    {% for job in jobs %}
+      <li data-id="{{ job.id }}">
+        <a href="{{ url_for('job_page', job_id=job.id) }}">{{ job.display_name }}</a>
+        <span class="pills" data-pills></span>
+      </li>
+    {% else %}
+      <li class="muted empty">Nothing yet — your transcripts will appear here.</li>
+    {% endfor %}
+  </ul>
+</section>
 {% endblock %}

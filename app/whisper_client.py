@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from openai import (
     APIConnectionError,
@@ -40,6 +40,16 @@ def _seg_get(seg: Any, key: str, default: Any) -> Any:
     return default if value is None else value
 
 
+@dataclass
+class ChunkResult:
+    """One transcribed audio file: text plus timestamped segments (chunk-relative)."""
+
+    text: str
+    segments: List[Dict[str, Any]]
+    language: Optional[str] = None
+    duration: Optional[float] = None
+
+
 def filter_segments(
     segments: Iterable[Any], flt: SegmentFilter
 ) -> Tuple[str, List[Tuple[str, str]]]:
@@ -48,6 +58,25 @@ def filter_segments(
     ``dropped`` is a list of (segment_text, reason) for logging so filtering is
     never silent. Pure function — no I/O — so it is easy to unit test.
     """
+    text, _kept, dropped = split_segments(segments, flt)
+    return text, dropped
+
+
+def _plain_segment(seg: Any) -> Dict[str, Any]:
+    return {
+        "start": float(_seg_get(seg, "start", 0.0)),
+        "end": float(_seg_get(seg, "end", 0.0)),
+        "text": str(_seg_get(seg, "text", "")).strip(),
+        "avg_logprob": float(_seg_get(seg, "avg_logprob", 0.0)),
+        "no_speech_prob": float(_seg_get(seg, "no_speech_prob", 0.0)),
+    }
+
+
+def split_segments(
+    segments: Iterable[Any], flt: SegmentFilter
+) -> Tuple[str, List[Dict[str, Any]], List[Tuple[str, str]]]:
+    """Like filter_segments, but also returns the kept segments as plain dicts."""
+    kept_segs: List[Dict[str, Any]] = []
     kept: List[str] = []
     dropped: List[Tuple[str, str]] = []
     for seg in segments:
@@ -66,8 +95,9 @@ def filter_segments(
             dropped.append((text, reason))
         elif text:
             kept.append(text)
+            kept_segs.append(_plain_segment(seg))
 
-    return " ".join(kept).strip(), dropped
+    return " ".join(kept).strip(), kept_segs, dropped
 
 
 def _extract_text(resp: Any) -> str:
@@ -119,6 +149,8 @@ class WhisperClient:
         segment_filter: SegmentFilter | None = None,
         candidate_languages: List[str] | None = None,
         verbose_capable: bool | None = None,
+        prompt: str | None = None,
+        extra_body: Dict[str, Any] | None = None,
     ) -> None:
         self.client = OpenAI(api_key=api_key, timeout=timeout, base_url=base_url)
         self.model = model
@@ -129,6 +161,10 @@ class WhisperClient:
         # confidence result wins — this pins Whisper to a known language set (e.g.
         # ro/ru/en) so it can never drift into Polish/Ukrainian.
         self.candidate_languages = candidate_languages or None
+        # Spelling/vocabulary hint (all providers) and extra decoding fields (only
+        # the local GPU server understands them; cloud APIs would reject them).
+        self.prompt = prompt or None
+        self.extra_body = dict(extra_body) if extra_body else None
         # None = infer from the model name. The local GPU server always returns
         # segment stats whatever its model is called, so it passes True.
         self._verbose_ok = _supports_verbose(model) if verbose_capable is None else verbose_capable
@@ -152,6 +188,10 @@ class WhisperClient:
                     )
                     if language:
                         kwargs["language"] = language
+                    if self.prompt:
+                        kwargs["prompt"] = self.prompt
+                    if self.extra_body:
+                        kwargs["extra_body"] = self.extra_body
                     return self.client.audio.transcriptions.create(**kwargs)
             except _RETRYABLE_ERRORS:
                 if attempt < retries:
@@ -163,15 +203,21 @@ class WhisperClient:
     def transcribe_file(
         self, audio_file: str | Path, logger: Callable[[str], None] | None = None
     ) -> str:
+        return self.transcribe_detailed(audio_file, logger).text
+
+    def transcribe_detailed(
+        self, audio_file: str | Path, logger: Callable[[str], None] | None = None
+    ) -> ChunkResult:
+        """Transcribe one file; segments are relative to the start of that file."""
         if self.candidate_languages and self._verbose_ok:
             return self._transcribe_race(audio_file, logger)
         response_format = "verbose_json" if self._use_verbose else "text"
         resp = self._create_with_retry(audio_file, response_format, self.language)
-        return self._finalize(resp, logger)
+        return self._finalize_detailed(resp, logger)
 
     def _transcribe_race(
         self, audio_file: str | Path, logger: Callable[[str], None] | None
-    ) -> str:
+    ) -> ChunkResult:
         """Transcribe once per candidate language; keep the most confident decode."""
         best: Optional[Tuple[float, str, Any, list]] = None
         for lang in self.candidate_languages:  # type: ignore[union-attr]
@@ -191,7 +237,9 @@ class WhisperClient:
         score, lang, resp, segments = best  # type: ignore[misc]
         if logger:
             logger(f"  Language race: picked '{lang}' (confidence {score:.3f})")
-        return self._finalize(resp, logger, segments=segments)
+        result = self._finalize_detailed(resp, logger, segments=segments)
+        result.language = lang
+        return result
 
     def _finalize(
         self,
@@ -199,19 +247,35 @@ class WhisperClient:
         logger: Callable[[str], None] | None,
         segments: Any = None,
     ) -> str:
-        if self._use_verbose and self.segment_filter is not None:
+        return self._finalize_detailed(resp, logger, segments=segments).text
+
+    def _finalize_detailed(
+        self,
+        resp: Any,
+        logger: Callable[[str], None] | None,
+        segments: Any = None,
+    ) -> ChunkResult:
+        language = _seg_get(resp, "language", None) if not isinstance(resp, str) else None
+        duration = _seg_get(resp, "duration", None) if not isinstance(resp, str) else None
+        if self._use_verbose:
             if segments is None:
                 segments = _seg_get(resp, "segments", None)
             if segments:
-                text, dropped = filter_segments(segments, self.segment_filter)
-                if dropped and logger:
-                    logger(f"  Filtered {len(dropped)} low-confidence segment(s):")
-                    for seg_text, reason in dropped:
-                        preview = (seg_text[:60] + "…") if len(seg_text) > 60 else seg_text
-                        logger(f"    - [{reason}] {preview!r}")
-                return text
+                if self.segment_filter is not None:
+                    text, kept, dropped = split_segments(segments, self.segment_filter)
+                    if dropped and logger:
+                        logger(f"  Filtered {len(dropped)} low-confidence segment(s):")
+                        for seg_text, reason in dropped:
+                            preview = (seg_text[:60] + "…") if len(seg_text) > 60 else seg_text
+                            logger(f"    - [{reason}] {preview!r}")
+                else:
+                    kept = [_plain_segment(s) for s in segments if str(_seg_get(s, "text", "")).strip()]
+                    text = " ".join(s["text"] for s in kept).strip()
+                return ChunkResult(text, kept, language, duration)
             # No segments came back (empty/near-silent audio) -> use plain text.
-        return _extract_text(resp)
+        text = _extract_text(resp).strip()
+        segs = [{"start": 0.0, "end": float(duration or 0.0), "text": text}] if text else []
+        return ChunkResult(text, segs, language, duration)
 
     def transcribe_many(self, audio_files: Iterable[str | Path]) -> str:
         parts: List[str] = []
