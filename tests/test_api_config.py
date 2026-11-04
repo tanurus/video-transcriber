@@ -101,3 +101,13 @@ def test_job_list_filters_segments_versions_and_actions(client, auth, done_job):
 def test_health_over_token(client, auth):
     data = client.get("/api/v1/health", headers=auth).get_json()
     assert {"gpu", "counts", "ai_ready", "supabase_ready"} <= set(data)
+
+
+def test_defaults_round_trip_keeps_the_preset_label(client, auth):
+    client.put("/api/v1/settings/defaults", headers=auth, json={"preset": "balanced", "merge": False})
+    got = client.get("/api/v1/settings/defaults", headers=auth).get_json()["options"]
+    back = client.put("/api/v1/settings/defaults", headers=auth, json={"options": got, "merge": False}).get_json()
+    assert back["options"]["preset"] == "balanced"
+    got["beam_size"] = 2  # no longer the preset's values -> honestly "custom"
+    back = client.put("/api/v1/settings/defaults", headers=auth, json={"options": got, "merge": False}).get_json()
+    assert back["options"]["preset"] == "custom"

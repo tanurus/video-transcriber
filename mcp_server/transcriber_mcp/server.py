@@ -12,6 +12,7 @@ change API keys, mint tokens or delete recordings — those stay in the web UI.
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from typing import Any, Dict, List, Literal, Optional
 
@@ -31,6 +32,9 @@ Video Transcriber: local GPU Whisper (large-v3) running on Andrew's VPS, reached
 
 READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False, open_world_hint=False)
+
+# httpx logs every request at INFO; on stdio that is noise in the client's MCP log.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 mcp = MCPServer("transcriber", instructions=INSTRUCTIONS)
 

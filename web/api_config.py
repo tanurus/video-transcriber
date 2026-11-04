@@ -85,6 +85,9 @@ def put_defaults():  # noqa: ANN202
     raw = body.get("options") or {}
     if not isinstance(raw, dict):
         return jsonify({"error": "'options' must be an object."}), 400
+    # What GET returns can be sent straight back: its "preset" label is not an option.
+    raw = dict(raw)
+    label = raw.pop("preset", None)
     unknown = sorted(k for k in raw if k not in O.BY_KEY)
     if unknown:
         return jsonify({"error": f"Unknown option(s): {', '.join(unknown)}. See /api/v1/settings/catalog."}), 400
@@ -94,6 +97,8 @@ def put_defaults():  # noqa: ANN202
     # merge (default): change only the keys sent, on top of the current defaults.
     base = _stored_defaults() if body.get("merge", True) else None
     opts = O.resolve(raw, base=base, preset=preset)
+    if not preset and label in O.PRESETS and O.resolve(preset=label) == {**opts, "preset": label}:
+        opts["preset"] = label  # the values still match that preset exactly
     stored = {k: v for k, v in opts.items() if k in O.BY_KEY or k == "preset"}
     _storage().set_setting("default_options", stored)
     return jsonify({"message": "Saved as the default for new uploads on every device.",
